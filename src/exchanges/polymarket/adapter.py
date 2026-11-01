@@ -46,6 +46,15 @@ class PolymarketAdapter(BaseExchange):
         # Order coordinator reference (set by bot)
         self._order_coordinator = None
     
+    @property
+    def paper_trading(self) -> bool:
+        """Paper trading mode (forwarded to REST client)"""
+        return self.rest_client.paper_trading
+    
+    @paper_trading.setter
+    def paper_trading(self, value: bool) -> None:
+        self.rest_client.paper_trading = bool(value)
+    
     def _enable_websocket(self) -> bool:
         """Enable WebSocket client"""
         if self.ws_client and self.ws_client.is_connected():

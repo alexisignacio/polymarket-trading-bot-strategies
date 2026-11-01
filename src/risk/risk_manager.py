@@ -49,14 +49,14 @@ class RiskManager:
         Args:
             strategy: Strategy name
             market_id: Market identifier
-            size: Trade size
-            price: Trade price
+            size: Trade size in USD notional
+            price: Trade price (informational)
             side: 'buy' or 'sell'
             
         Returns:
             Tuple of (allowed: bool, reason: Optional[str])
         """
-        trade_value = size * price
+        trade_value = size
         
         # Check position size limit
         if trade_value > self.max_position_size:
@@ -69,13 +69,13 @@ class RiskManager:
         
         # Check per-market exposure
         market_positions = self.position_tracker.get_positions_by_market(market_id)
-        market_exposure = sum(p.entry_price * p.size for p in market_positions)
+        market_exposure = sum(p.size for p in market_positions)
         if market_exposure + trade_value > self.max_per_market_exposure:
             return False, f"Market exposure ${market_exposure + trade_value:.2f} exceeds limit ${self.max_per_market_exposure:.2f}"
         
         # Check per-strategy exposure
         strategy_positions = self.position_tracker.get_positions_by_strategy(strategy)
-        strategy_exposure = sum(p.entry_price * p.size for p in strategy_positions)
+        strategy_exposure = sum(p.size for p in strategy_positions)
         if strategy_exposure + trade_value > self.max_per_strategy_exposure:
             return False, f"Strategy exposure ${strategy_exposure + trade_value:.2f} exceeds limit ${self.max_per_strategy_exposure:.2f}"
         

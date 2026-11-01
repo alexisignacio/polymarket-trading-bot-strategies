@@ -95,7 +95,7 @@ class MarketAnalyzer:
             return {'profit_pct': 0, 'profit': 0}
         
         profit = sell_price - buy_price
-        profit_pct = (profit / buy_price) * 100
+        profit_pct = round((profit / buy_price) * 100, 4)
         
         return {
             'buy_price': buy_price,

@@ -9,7 +9,6 @@ import os
 sys.path.insert(0, os.path.abspath("src"))
 
 from src.strategies.tail_end_strategy import TailEndStrategy
-from src.strategies.combinatorial_arbitrage import CombinatorialStrategy
 
 class TestNewStrategies(unittest.TestCase):
     def setUp(self):
@@ -47,33 +46,6 @@ class TestNewStrategies(unittest.TestCase):
         self.assertEqual(opportunities[0]['market_id'], 'm1')
         self.assertEqual(opportunities[0]['price'], 0.95)
         print("✅ Tail End Strategy verified")
-
-    def test_combinatorial_strategy(self):
-        strategy = CombinatorialStrategy(
-            name="combinatorial",
-            polymarket_client=self.mock_client,
-            risk_manager=self.mock_risk_manager,
-            config={'keywords': ['Bitcoin'], 'divergence_threshold': 0.10},
-            market_cache=self.mock_market_cache
-        )
-        
-        # Mock Markets (Correlated)
-        markets = [
-            {'id': 'm1', 'question': 'Will Bitcoin hit 100k?', 'keywords': 'Bitcoin'},
-            {'id': 'm2', 'question': 'Will Bitcoin hit 100k in 2024?', 'keywords': 'Bitcoin'}
-        ]
-        self.mock_market_cache.get_markets.return_value = markets
-        
-        # Mock Prices (Divergent)
-        # m1: YES @ 0.40, m2: YES @ 0.50 (Diff 0.10, 20% > 10%)
-        self.mock_market_cache.get_price.side_effect = lambda mid, outcome: {'ask': 0.40} if mid == 'm1' else {'ask': 0.50}
-        
-        opportunities = strategy.scan_opportunities()
-        
-        self.assertEqual(len(opportunities), 1)
-        self.assertEqual(opportunities[0]['type'], 'divergence')
-        self.assertAlmostEqual(opportunities[0]['diff'], 0.10)
-        print("✅ Combinatorial Strategy verified")
 
 if __name__ == '__main__':
     unittest.main()

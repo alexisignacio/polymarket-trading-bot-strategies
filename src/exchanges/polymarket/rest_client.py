@@ -30,9 +30,15 @@ class PolymarketRESTClient:
             self.api_key = api_key
             self.private_key = private_key
         else:
-            creds = AuthManager.get_polymarket_credentials()
-            self.api_key = creds['api_key']
-            self.private_key = creds['private_key']
+            try:
+                creds = AuthManager.get_polymarket_credentials()
+                self.api_key = creds['api_key']
+                self.private_key = creds['private_key']
+            except ValueError:
+                if not paper_trading:
+                    raise
+                self.api_key = ""
+                self.private_key = ""
         
         self.paper_trading = paper_trading
         self.session = requests.Session()
@@ -193,12 +199,21 @@ class PolymarketRESTClient:
             return {'bids': [], 'asks': []}
     
     def place_order(self, market_id: str, outcome: str, side: str, size: float, price: float) -> Dict:
-        """Place order"""
+        """Place order.
+        
+        Args:
+            size: Order size in USD notional (converted to shares for the wire)
+            price: Limit price
+        """
+        shares = size / price if price > 0 else 0.0
         if self.paper_trading:
             order_id = f'paper_{market_id}_{side}_{int(time.time() * 1000)}'
             return {
                 'order_id': order_id,
                 'status': 'pending',
+                'size': size,
+                'shares': shares,
+                'price': price,
                 'paper_trading': True
             }
         
@@ -207,7 +222,7 @@ class PolymarketRESTClient:
             'market': market_id,
             'outcome': outcome,
             'side': side,
-            'size': str(size),
+            'size': str(shares),
             'price': str(price)
         }
         

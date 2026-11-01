@@ -16,7 +16,7 @@ class Position:
     market_id: str
     strategy: str
     side: str  # 'buy' or 'sell'
-    size: float
+    size: float  # USD notional at entry (not share count)
     entry_price: float
     current_price: Optional[float] = None
     timestamp: datetime = field(default_factory=datetime.now)
@@ -80,13 +80,16 @@ class PositionTracker:
         position.current_price = exit_price
         position.status = 'closed'
         
-        # Calculate P&L
-        if position.side == 'buy':
-            position.pnl = (exit_price - position.entry_price) * position.size
-        else:  # sell
-            position.pnl = (position.entry_price - exit_price) * position.size
-        
-        position.pnl_pct = (position.pnl / (position.entry_price * position.size)) * 100
+        # Calculate P&L (size is USD notional at entry; shares = size / entry_price)
+        if position.entry_price > 0:
+            if position.side == 'buy':
+                position.pnl = (exit_price - position.entry_price) / position.entry_price * position.size
+            else:  # sell
+                position.pnl = (position.entry_price - exit_price) / position.entry_price * position.size
+            position.pnl_pct = (position.pnl / position.size) * 100 if position.size else 0.0
+        else:
+            position.pnl = 0.0
+            position.pnl_pct = 0.0
         
         # Move to closed positions
         self.closed_positions.append(position)
@@ -133,7 +136,7 @@ class PositionTracker:
         if strategy:
             positions = [p for p in positions if p.strategy == strategy]
         
-        return sum(p.entry_price * p.size for p in positions)
+        return sum(p.size for p in positions)
     
     def get_total_pnl(self) -> float:
         """

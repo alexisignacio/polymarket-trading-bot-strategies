@@ -81,11 +81,13 @@ def main():
     
     try:
         # Initialize and run bot
-        bot = TradingBot(config_path=str(config_path))
+        bot = TradingBot(config_path=str(config_path), paper_trading=True if args.paper else None)
         
         # Override paper trading if specified
         if args.paper:
             bot.polymarket_client.paper_trading = True
+            if hasattr(bot.polymarket_client, 'rest_client'):
+                bot.polymarket_client.rest_client.paper_trading = True
             if bot.perpdex_client:
                 bot.perpdex_client.paper_trading = True
             logger.info("Paper trading mode enabled via command line")

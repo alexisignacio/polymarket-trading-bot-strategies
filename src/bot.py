@@ -16,19 +16,13 @@ from .core.order_coordinator import OrderCoordinator
 from .core.state_manager import StateManager
 from .utils.api_health_check import APIHealthCheck
 from .strategies.base_strategy import BaseStrategy
-from .strategies.hedging import HedgingStrategy
-from .strategies.micro_spreads import MicroSpreadStrategy
-from .strategies.liquidity import LiquidityStrategy
 from .strategies.single_arbitrage import SingleArbitrageStrategy
-from .strategies.low_volume_spread import LowVolumeSpreadStrategy
 from .strategies.market_making import MarketMakingStrategy
 from .strategies.spread_scalping import SpreadScalpingStrategy
 from .strategies.tail_end_strategy import TailEndStrategy
-from .strategies.combinatorial_arbitrage import CombinatorialStrategy
-from .strategies.legged_arbitrage import LeggedArbitrageStrategy
 from .utils.logger import setup_logger, get_trade_logger, get_error_logger
 from .utils.config_loader import ConfigLoader
-from .utils.profitability_tracker import ProfitabilityTracker, TradeRecord
+from .utils.profitability_tracker import ProfitabilityTracker
 from .utils.market_cache import MarketCache
 from .utils.telegram_notifier import TelegramNotifier
 
@@ -41,18 +35,21 @@ error_logger = get_error_logger()
 class TradingBot:
     """Main trading bot orchestrator"""
     
-    def __init__(self, config_path: str = "config/config.yaml"):
+    def __init__(self, config_path: str = "config/config.yaml", paper_trading: Optional[bool] = None):
         """
         Initialize trading bot.
         
         Args:
             config_path: Path to configuration file
+            paper_trading: Override paper trading mode (None = use config)
         """
         self.config_loader = ConfigLoader(config_path)
         self.config = self.config_loader.config
         
         # Initialize API clients
-        paper_trading = self.config.get('paper_trading', True)
+        if paper_trading is None:
+            paper_trading = self.config.get('paper_trading', True)
+        self.paper_trading = paper_trading
         
         # Use new adapter pattern (can fall back to old client if needed)
         use_adapter = self.config.get('use_exchange_adapter', True)
@@ -164,43 +161,6 @@ class TradingBot:
     
     def _initialize_strategies(self) -> None:
         """Initialize all trading strategies"""
-        # Hedging strategy
-        hedging_config = self.config_loader.get_strategy_config('hedging')
-        if hedging_config.get('enabled', False):
-            if self.perpdex_client:
-                self.strategies['hedging'] = HedgingStrategy(
-                    name='hedging',
-                    polymarket_client=self.polymarket_client,
-                    risk_manager=self.risk_manager,
-                    config=hedging_config,
-                    perpdex_client=self.perpdex_client,
-                    market_cache=self.market_cache
-                )
-            else:
-                logger.warning("Hedging strategy disabled: Perpdex client not available")
-        
-        # Micro-spread strategy
-        micro_spread_config = self.config_loader.get_strategy_config('micro_spreads')
-        if micro_spread_config.get('enabled', False):
-            self.strategies['micro_spreads'] = MicroSpreadStrategy(
-                name='micro_spreads',
-                polymarket_client=self.polymarket_client,
-                risk_manager=self.risk_manager,
-                config=micro_spread_config,
-                market_cache=self.market_cache
-            )
-        
-        # Liquidity strategy
-        liquidity_config = self.config_loader.get_strategy_config('liquidity')
-        if liquidity_config.get('enabled', False):
-            self.strategies['liquidity'] = LiquidityStrategy(
-                name='liquidity',
-                polymarket_client=self.polymarket_client,
-                risk_manager=self.risk_manager,
-                config=liquidity_config,
-                market_cache=self.market_cache
-            )
-        
         # Single arbitrage strategy
         single_arb_config = self.config_loader.get_strategy_config('single_arbitrage')
         if single_arb_config.get('enabled', False):
@@ -209,17 +169,6 @@ class TradingBot:
                 polymarket_client=self.polymarket_client,
                 risk_manager=self.risk_manager,
                 config=single_arb_config,
-                market_cache=self.market_cache
-            )
-        
-        # Low-volume spread strategy (split orders for small traders)
-        low_volume_config = self.config_loader.get_strategy_config('low_volume_spread')
-        if low_volume_config.get('enabled', False):
-            self.strategies['low_volume_spread'] = LowVolumeSpreadStrategy(
-                name='low_volume_spread',
-                polymarket_client=self.polymarket_client,
-                risk_manager=self.risk_manager,
-                config=low_volume_config,
                 market_cache=self.market_cache
             )
         
@@ -253,28 +202,6 @@ class TradingBot:
                 polymarket_client=self.polymarket_client,
                 risk_manager=self.risk_manager,
                 config=tail_end_config,
-                market_cache=self.market_cache
-            )
-            
-        # Combinatorial Strategy
-        combinatorial_config = self.config_loader.get_strategy_config('combinatorial')
-        if combinatorial_config.get('enabled', False):
-            self.strategies['combinatorial'] = CombinatorialStrategy(
-                name='combinatorial',
-                polymarket_client=self.polymarket_client,
-                risk_manager=self.risk_manager,
-                config=combinatorial_config,
-                market_cache=self.market_cache
-            )
-            
-        # Legged Arbitrage Strategy
-        legged_config = self.config_loader.get_strategy_config('legged_arbitrage')
-        if legged_config.get('enabled', False):
-            self.strategies['legged_arbitrage'] = LeggedArbitrageStrategy(
-                name='legged_arbitrage',
-                polymarket_client=self.polymarket_client,
-                risk_manager=self.risk_manager,
-                config=legged_config,
                 market_cache=self.market_cache
             )
         

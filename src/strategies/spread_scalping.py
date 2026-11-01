@@ -296,9 +296,9 @@ class SpreadScalpingStrategy(BaseStrategy):
         
         try:
             if type == 'entry':
-                # Place Limit Buy at Bid
+                # Place Limit Buy at Bid (size = USD notional)
                 price = opportunity['bid']
-                size = self.order_size_usdc / price
+                size = self.order_size_usdc
                 
                 logger.info(f"[{self.name}] Placing ENTRY Buy Order: {market_id} {outcome} @ {price}")
                 
@@ -327,9 +327,9 @@ class SpreadScalpingStrategy(BaseStrategy):
                     logger.warning(f"Trade rejected by risk manager: {reason}")
                     
             elif type == 'exit':
-                # Place Limit Sell at Ask
+                # Place Limit Sell at Ask (opportunity['size'] is shares held -> USD notional)
                 price = opportunity['target_price']
-                size = opportunity['size']
+                size = opportunity['size'] * price
                 
                 logger.info(f"[{self.name}] Placing EXIT Sell Order: {market_id} {outcome} @ {price}")
                 

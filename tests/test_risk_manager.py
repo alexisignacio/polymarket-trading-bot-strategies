@@ -44,7 +44,7 @@ def test_trade_allowed():
     allowed, reason = rm.check_trade_allowed(
         strategy='test',
         market_id='market1',
-        size=2000.0,
+        size=2500.0,
         price=0.5,
         side='buy'
     )

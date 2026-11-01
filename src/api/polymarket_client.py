@@ -35,9 +35,15 @@ class PolymarketClient:
             self.api_key = api_key
             self.private_key = private_key
         else:
-            creds = AuthManager.get_polymarket_credentials()
-            self.api_key = creds['api_key']
-            self.private_key = creds['private_key']
+            try:
+                creds = AuthManager.get_polymarket_credentials()
+                self.api_key = creds['api_key']
+                self.private_key = creds['private_key']
+            except ValueError:
+                if not paper_trading:
+                    raise
+                self.api_key = ""
+                self.private_key = ""
         
         self.paper_trading = paper_trading
         self.session = requests.Session()
@@ -309,7 +315,7 @@ class PolymarketClient:
             market_id: Market identifier
             outcome: Outcome type (YES/NO)
             side: 'buy' or 'sell'
-            size: Order size in shares
+            size: Order size in USD notional (converted to shares for the wire)
             price: Limit price
             order_coordinator: Order coordinator instance (optional)
             strategy: Strategy name (optional)
@@ -317,13 +323,17 @@ class PolymarketClient:
         Returns:
             Order response dictionary
         """
+        shares = size / price if price > 0 else 0.0
         if self.paper_trading:
             order_id = f'paper_{market_id}_{side}_{int(time.time() * 1000)}'
-            logger.info(f"[PAPER] Placing {side} order: {size} @ {price} on {market_id}")
+            logger.info(f"[PAPER] Placing {side} order: ${size:.2f} ({shares:.2f} shares) @ {price} on {market_id}")
             
             result = {
                 'order_id': order_id,
                 'status': 'pending',
+                'size': size,
+                'shares': shares,
+                'price': price,
                 'paper_trading': True
             }
             
@@ -349,7 +359,7 @@ class PolymarketClient:
             'market': market_id,
             'outcome': outcome,
             'side': side,
-            'size': str(size),
+            'size': str(shares),
             'price': str(price)
         }
         

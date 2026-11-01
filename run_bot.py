@@ -28,14 +28,7 @@ print('=' * 70)
 print()
 
 try:
-    bot = TradingBot(config_path='config/config.yaml')
-    # Paper trading is set via config, but ensure it's enabled
-    if hasattr(bot.polymarket_client, 'rest_client'):
-        # Adapter pattern
-        bot.polymarket_client.rest_client.paper_trading = True
-    else:
-        # Old client pattern
-        bot.polymarket_client.paper_trading = True
+    bot = TradingBot(config_path='config/config.yaml', paper_trading=True)
     
     if bot.perpdex_client:
         bot.perpdex_client.paper_trading = True

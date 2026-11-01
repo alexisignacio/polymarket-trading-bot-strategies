@@ -9,7 +9,6 @@ import os
 sys.path.insert(0, os.path.abspath("src"))
 
 from src.strategies.tail_end_strategy import TailEndStrategy
-from src.strategies.combinatorial_arbitrage import CombinatorialStrategy
 from src.strategies.market_making import MarketMakingStrategy
 
 class TestEdgeCases(unittest.TestCase):
@@ -63,65 +62,6 @@ class TestEdgeCases(unittest.TestCase):
         opportunities = strategy.scan_opportunities()
         self.assertEqual(len(opportunities), 0)
         print("✅ Tail-End: Handled zero price gracefully")
-
-    # --- Combinatorial Strategy Edge Cases ---
-
-    def test_combinatorial_empty_keywords(self):
-        """Test with no keywords configured"""
-        strategy = CombinatorialStrategy(
-            name="combinatorial",
-            polymarket_client=self.mock_client,
-            risk_manager=self.mock_risk_manager,
-            config={'keywords': []},
-            market_cache=self.mock_market_cache
-        )
-        
-        markets = [{'id': 'm1', 'question': 'Bitcoin'}]
-        self.mock_market_cache.get_markets.return_value = markets
-        
-        opportunities = strategy.scan_opportunities()
-        self.assertEqual(len(opportunities), 0)
-        print("✅ Combinatorial: Handled empty keywords gracefully")
-
-    def test_combinatorial_zero_prices(self):
-        """Test validation to prevent division by zero"""
-        strategy = CombinatorialStrategy(
-            name="combinatorial",
-            polymarket_client=self.mock_client,
-            risk_manager=self.mock_risk_manager,
-            config={'keywords': ['Bitcoin']},
-            market_cache=self.mock_market_cache
-        )
-        
-        markets = [
-            {'id': 'm1', 'question': 'Bitcoin 1'},
-            {'id': 'm2', 'question': 'Bitcoin 2'}
-        ]
-        self.mock_market_cache.get_markets.return_value = markets
-        
-        # Both prices 0
-        self.mock_market_cache.get_price.return_value = {'ask': 0.0}
-        
-        opportunities = strategy.scan_opportunities()
-        self.assertEqual(len(opportunities), 0)
-        print("✅ Combinatorial: Handled zero prices (div by zero check)")
-
-    def test_combinatorial_similarity_empty_strings(self):
-        """Test similarity calculation with empty strings"""
-        strategy = CombinatorialStrategy(
-            name="combinatorial",
-            polymarket_client=self.mock_client,
-            risk_manager=self.mock_risk_manager,
-            config={},
-            market_cache=self.mock_market_cache
-        )
-        
-        score = strategy._calculate_similarity("", "Bitcoin")
-        self.assertEqual(score, 0.0)
-        
-        score = strategy._calculate_similarity(None, "Bitcoin")
-        self.assertEqual(score, 0.0)
-        print("✅ Combinatorial: Handled empty similarity strings")
 
     # --- Market Making Strategy Edge Cases ---
 
