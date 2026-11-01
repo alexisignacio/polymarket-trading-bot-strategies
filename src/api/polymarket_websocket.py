@@ -59,34 +59,51 @@ class PolymarketWebSocketClient:
         Messages have event_type: "book", "price_change", "tick_size_change", "last_trade_price"
         """
         try:
+            if isinstance(message, bytes):
+                message = message.decode('utf-8', errors='ignore')
+            if not message or not str(message).strip():
+                return  # keepalive / empty frame
+            
             data = json.loads(message)
             
-            if not isinstance(data, dict):
+            # MARKET channel delivers batches as JSON arrays of events
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        self._dispatch_event(item)
                 return
             
-            # Handle different event types from MARKET channel
-            event_type = data.get('event_type', '').lower()
-            
-            if event_type == 'book':
-                # Book message - full orderbook snapshot
-                self._handle_book_message(data)
-            elif event_type == 'price_change':
-                # Price change message - incremental updates
-                self._handle_price_change_message(data)
-            elif event_type == 'tick_size_change':
-                # Tick size change - market tick size updated
-                logger.debug(f"Tick size change: {data.get('market')}")
-            elif event_type == 'last_trade_price':
-                # Last trade - trade executed
-                logger.debug(f"Last trade: {data.get('market')} @ {data.get('price')}")
-            else:
-                # Unknown message type - log for debugging
-                logger.debug(f"Unknown WebSocket message type: {event_type}")
+            if isinstance(data, dict):
+                self._dispatch_event(data)
             
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse WebSocket message: {e}")
+            logger.debug(f"Non-JSON WebSocket frame ignored: {e}")
         except Exception as e:
             logger.error(f"Error handling WebSocket message: {e}")
+    
+    def _dispatch_event(self, data: Dict) -> None:
+        """Route a single MARKET-channel event"""
+        if not isinstance(data, dict):
+            return
+        
+        # Handle different event types from MARKET channel
+        event_type = data.get('event_type', '').lower()
+        
+        if event_type == 'book':
+            # Book message - full orderbook snapshot
+            self._handle_book_message(data)
+        elif event_type == 'price_change':
+            # Price change message - incremental updates
+            self._handle_price_change_message(data)
+        elif event_type == 'tick_size_change':
+            # Tick size change - market tick size updated
+            logger.debug(f"Tick size change: {data.get('market')}")
+        elif event_type == 'last_trade_price':
+            # Last trade - trade executed
+            logger.debug(f"Last trade: {data.get('market')} @ {data.get('price')}")
+        else:
+            # Unknown message type - log for debugging
+            logger.debug(f"Unknown WebSocket message type: {event_type}")
     
     def _handle_book_message(self, data: Dict) -> None:
         """
@@ -117,15 +134,17 @@ class PolymarketWebSocketClient:
             bids = [{'price': float(b.get('price', 0)), 'size': float(b.get('size', 0))} for b in bids_raw]
             asks = [{'price': float(a.get('price', 0)), 'size': float(a.get('size', 0))} for a in asks_raw]
             
-            # Try to determine outcome from asset_id mapping or default to YES
-            outcome = 'YES'  # Default
+            # Resolve outcome from the asset map or the REST token index.
+            # Never assume YES: a NO book cached as YES corrupts prices.
+            outcome = None
             if asset_id in self.asset_id_map:
                 market_id, outcome = self.asset_id_map[asset_id]
             else:
-                # Store mapping for future reference
-                # Note: We'd need to fetch this from market data to know the outcome
-                # For now, default to YES
-                pass
+                outcome = self._resolve_outcome(market_id, asset_id)
+                if not outcome:
+                    logger.debug(f"Unknown asset_id {str(asset_id)[:20]}... - skipping book (no outcome)")
+                    return
+                self.asset_id_map[asset_id] = (market_id, outcome)
             
             key = (market_id, outcome)
             
@@ -150,10 +169,18 @@ class PolymarketWebSocketClient:
         """
         Handle 'price_change' event_type message from MARKET channel.
         
-        Structure according to docs:
-        - event_type: "price_change"
-        - market: condition ID
-        - price_changes: PriceChange[] array
+        Real payload:
+        {
+          "event_type": "price_change",
+          "market": "<condition_id>",
+          "price_changes": [
+            {"asset_id": "...", "price": "0.22", "size": "384", "side": "SELL",
+             "best_bid": "0.019", "best_ask": "0.02", ...}, ...
+          ]
+        }
+        
+        Each change updates one price level of one asset's book. We apply the
+        level update to the cached orderbook and refresh best bid/ask.
         """
         try:
             market_id = data.get('market')
@@ -162,16 +189,77 @@ class PolymarketWebSocketClient:
             if not market_id or not price_changes:
                 return
             
-            # Price changes are incremental updates
-            # We'd need to merge these into our cached orderbook
-            # For now, log that we received them
-            logger.debug(f"Price change received for market {market_id}: {len(price_changes)} changes")
-            
-            # TODO: Implement incremental orderbook update logic
-            # For now, we rely on full 'book' messages for orderbook state
+            for change in price_changes:
+                if not isinstance(change, dict):
+                    continue
+                
+                asset_id = change.get('asset_id')
+                if not asset_id:
+                    continue
+                
+                if asset_id in self.asset_id_map:
+                    _, outcome = self.asset_id_map[asset_id]
+                else:
+                    outcome = self._resolve_outcome(market_id, asset_id)
+                    if not outcome:
+                        continue
+                    self.asset_id_map[asset_id] = (market_id, outcome)
+                
+                key = (market_id, outcome)
+                price = float(change.get('price', 0) or 0)
+                size = float(change.get('size', 0) or 0)
+                side = str(change.get('side', '')).upper()
+                
+                if price <= 0:
+                    continue
+                
+                with self.lock:
+                    book = self.orderbook_cache.get(key)
+                    if book is None:
+                        continue  # no snapshot yet; wait for 'book' event
+                    
+                    levels = book.get('bids') if side == 'BUY' else book.get('asks') if side == 'SELL' else None
+                    if levels is None:
+                        continue
+                    
+                    # Update or remove the level at this price (size 0 = remove)
+                    updated = False
+                    for i, level in enumerate(levels):
+                        if abs(float(level.get('price', 0)) - price) < 1e-9:
+                            if size > 0:
+                                levels[i]['size'] = size
+                            else:
+                                levels.pop(i)
+                            updated = True
+                            break
+                    if not updated and size > 0:
+                        levels.append({'price': price, 'size': size})
+                    
+                    book['timestamp'] = time.time()
         
         except Exception as e:
             logger.error(f"Error handling price change message: {e}")
+    
+    def _resolve_outcome(self, market_id: str, asset_id: str) -> Optional[str]:
+        """Map an asset_id (token) to YES/NO using the REST client's token index"""
+        index = getattr(self.rest_client, '_token_index', None) if self.rest_client else None
+        if not index:
+            return None
+        for outcome, token_id in (index.get(market_id) or {}).items():
+            if str(token_id) == str(asset_id):
+                return outcome
+        # Fall back to a direct market fetch via the REST client
+        if self.rest_client:
+            try:
+                resolved = self.rest_client.resolve_token_id(market_id, 'YES')
+                if resolved == str(asset_id):
+                    return 'YES'
+                resolved = self.rest_client.resolve_token_id(market_id, 'NO')
+                if resolved == str(asset_id):
+                    return 'NO'
+            except Exception:
+                pass
+        return None
     
     def _on_error(self, ws, error):
         """Handle WebSocket errors"""
@@ -280,29 +368,15 @@ class PolymarketWebSocketClient:
         if outcome and len(outcome) > 20 and outcome.replace('.', '').isdigit():
             return outcome
         
-        # Try to get from market data if rest_client provided
-        if rest_client:
+        # Resolve via REST client's token index (markets carry tokens[] with token_id)
+        if rest_client is not None:
             try:
-                # Try get_market method (adapter) or direct API call
-                if hasattr(rest_client, 'get_market'):
-                    market_data = rest_client.get_market(market_id)
-                elif hasattr(rest_client, '_request'):
-                    # Direct REST client - use API endpoint
-                    endpoint = f"/markets/{market_id}"
-                    market_data = rest_client._request('GET', endpoint)
-                else:
-                    market_data = None
-                
-                if market_data:
-                    outcomes = market_data.get('outcomes', [])
-                    for out in outcomes:
-                        if isinstance(out, dict):
-                            out_name = out.get('name', '').upper()
-                            token_id = out.get('token_id') or out.get('tokenId') or out.get('clobTokenId')
-                            if out_name == outcome.upper() and token_id:
-                                return token_id
+                if hasattr(rest_client, 'resolve_token_id'):
+                    return rest_client.resolve_token_id(market_id, outcome)
+                if hasattr(rest_client, 'rest_client') and hasattr(rest_client.rest_client, 'resolve_token_id'):
+                    return rest_client.rest_client.resolve_token_id(market_id, outcome)
             except Exception as e:
-                logger.debug(f"Error fetching market data for {market_id}: {e}")
+                logger.debug(f"Error resolving token for {market_id}: {e}")
         
         return None
     
@@ -320,11 +394,11 @@ class PolymarketWebSocketClient:
         try:
             subscribe_msg = {
                 "type": "MARKET",
-                "asset_ids": asset_ids
+                "assets_ids": asset_ids
             }
             
             self.ws.send(json.dumps(subscribe_msg))
-            logger.debug(f"Updated MARKET channel subscription with {len(asset_ids)} asset_ids")
+            logger.debug(f"Updated MARKET channel subscription with {len(asset_ids)} assets_ids")
         except Exception as e:
             logger.error(f"Failed to update subscription: {e}")
     
@@ -457,13 +531,8 @@ class PolymarketWebSocketClient:
         
         if self.connected and self.ws:
             try:
-                unsubscribe_msg = {
-                    'type': 'unsubscribe',
-                    'channel': 'orderbook',
-                    'market': market_id,
-                    'outcome': outcome
-                }
-                self.ws.send(json.dumps(unsubscribe_msg))
+                # Protocol has no dedicated unsubscribe; resubscribe without the asset
+                self._update_subscription(list(self.asset_id_map.keys()))
             except Exception as e:
                 logger.error(f"Failed to unsubscribe: {e}")
     

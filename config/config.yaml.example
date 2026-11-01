@@ -7,7 +7,6 @@ paper_trading: true  # Set to false for live trading
 polling_interval: 5.0  # Seconds between trading iterations
 state_file: "bot_state.json"  # File to save/restore bot state
 run_health_check_on_startup: false  # Run API health check on bot startup (set to true to verify data)
-use_exchange_adapter: true  # Use new exchange adapter pattern (recommended)
 market_cache_ttl: 5.0  # Seconds to cache market/price data
 
 # WebSocket settings

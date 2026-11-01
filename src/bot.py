@@ -7,7 +7,6 @@ import sys
 from typing import Dict, List, Optional
 from datetime import datetime
 
-from .api.polymarket_client import PolymarketClient
 from .exchanges.polymarket.adapter import PolymarketAdapter
 from .api.perpdex_client import PerpdexClient
 from .api.auth import AuthManager
@@ -51,33 +50,25 @@ class TradingBot:
             paper_trading = self.config.get('paper_trading', True)
         self.paper_trading = paper_trading
         
-        # Use new adapter pattern (can fall back to old client if needed)
-        use_adapter = self.config.get('use_exchange_adapter', True)
+        ws_enabled = self.config.get('websocket', {}).get('enabled', False)
+        # Get API credentials if available
+        api_key = None
+        private_key = None
+        try:
+            creds = AuthManager.get_polymarket_credentials()
+            api_key = creds.get('api_key')
+            private_key = creds.get('private_key')
+        except Exception:
+            # Credentials not required for paper trading
+            pass
         
-        if use_adapter:
-            ws_enabled = self.config.get('websocket', {}).get('enabled', False)
-            # Get API credentials if available
-            api_key = None
-            private_key = None
-            try:
-                creds = AuthManager.get_polymarket_credentials()
-                api_key = creds.get('api_key')
-                private_key = creds.get('private_key')
-            except Exception:
-                # Credentials not required for paper trading
-                pass
-            
-            self.polymarket_client = PolymarketAdapter(
-                api_key=api_key,
-                private_key=private_key,
-                paper_trading=paper_trading,
-                use_websocket=ws_enabled
-            )
-            # For compatibility, expose rest_client methods
-            self.polymarket_client._order_coordinator = None
-        else:
-            # Fallback to old client
-            self.polymarket_client = PolymarketClient(paper_trading=paper_trading)
+        self.polymarket_client = PolymarketAdapter(
+            api_key=api_key,
+            private_key=private_key,
+            paper_trading=paper_trading,
+            use_websocket=ws_enabled
+        )
+        self.polymarket_client._order_coordinator = None
         
         self.perpdex_client = None
         if AuthManager.validate_credentials('perpdex'):

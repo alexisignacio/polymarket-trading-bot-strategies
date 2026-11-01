@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
-from ..api.polymarket_client import PolymarketClient
+from ..exchanges.polymarket.adapter import PolymarketAdapter
 from ..api.perpdex_client import PerpdexClient
 from ..risk.risk_manager import RiskManager
 from ..utils.logger import setup_logger
@@ -19,7 +19,7 @@ class BaseStrategy(ABC):
     def __init__(
         self,
         name: str,
-        polymarket_client: PolymarketClient,
+        polymarket_client: PolymarketAdapter,
         risk_manager: RiskManager,
         config: Dict,
         perpdex_client: Optional[PerpdexClient] = None,

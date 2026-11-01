@@ -3,6 +3,7 @@
 from typing import Dict, List, Optional
 from ...exchanges.base_exchange import BaseExchange
 from .rest_client import PolymarketRESTClient
+from .normalizer import best_bid_ask
 from ...api.polymarket_websocket import PolymarketWebSocketClient
 from ...utils.logger import setup_logger
 
@@ -124,32 +125,23 @@ class PolymarketAdapter(BaseExchange):
     
     def get_orderbook(self, market_id: str, outcome: str = "YES") -> Dict:
         """Get orderbook - tries WebSocket first, falls back to REST"""
-        # Try WebSocket if enabled
+        # Try WebSocket cache if enabled (never block: REST fallback below)
         if self.use_websocket and self.ws_client and self.ws_client.is_connected():
             cached = self.ws_client.get_orderbook(market_id, outcome)
             if cached:
                 return cached
             
-            # Subscribe and wait (pass rest_client to get asset_ids)
+            # Subscribe so future updates land in the cache, then use REST now
             self.ws_client.subscribe_orderbook(market_id, outcome, rest_client=self.rest_client)
-            import time
-            time.sleep(0.5)
-            cached = self.ws_client.get_orderbook(market_id, outcome)
-            if cached:
-                return cached
         
         # Fallback to REST
         return self.rest_client.get_orderbook(market_id, outcome)
     
     def get_best_price(self, market_id: str, outcome: str = "YES") -> Dict:
-        """Get best prices"""
+        """Get best prices (handles unordered books: best bid = max, best ask = min)"""
         orderbook = self.get_orderbook(market_id, outcome)
         
-        bids = orderbook.get('bids', [])
-        asks = orderbook.get('asks', [])
-        
-        best_bid = float(bids[0]['price']) if bids and isinstance(bids[0], dict) else None
-        best_ask = float(asks[0]['price']) if asks and isinstance(asks[0], dict) else None
+        best_bid, best_ask = best_bid_ask(orderbook)
         
         prices = {
             'bid': best_bid,
@@ -193,6 +185,46 @@ class PolymarketAdapter(BaseExchange):
                 logger.warning(f"Order coordinator rejected order: {e}")
         
         return result
+    
+    def get_best_prices_batch(self, pairs: List[tuple]) -> Dict[str, Dict]:
+        """Fetch best bid/ask for many (market_id, outcome) pairs in one request.
+        
+        Args:
+            pairs: list of (market_id_or_token, outcome) tuples
+            
+        Returns:
+            {"market_id_outcome": {'bid', 'ask', 'spread'}} for pairs with data
+        """
+        resolved: List[tuple] = []
+        for market_id, outcome in pairs:
+            token_id = self.rest_client.resolve_token_id(market_id, outcome)
+            if token_id:
+                resolved.append((f"{market_id}_{outcome}", token_id))
+        
+        if not resolved:
+            return {}
+        
+        books = []
+        for i in range(0, len(resolved), 100):
+            books.extend(self.rest_client.get_orderbooks(
+                [tid for _, tid in resolved[i:i + 100]]
+            ))
+        by_asset = {str(b.get('asset_id')): b for b in books if isinstance(b, dict)}
+        
+        results = {}
+        for key, token_id in resolved:
+            book = by_asset.get(str(token_id))
+            if not book:
+                continue
+            best_bid, best_ask = best_bid_ask(book)
+            if best_bid is None and best_ask is None:
+                continue
+            results[key] = {
+                'bid': best_bid,
+                'ask': best_ask,
+                'spread': best_ask - best_bid if (best_bid and best_ask) else None
+            }
+        return results
     
     def cancel_order(self, order_id: str) -> Dict:
         """Cancel order"""

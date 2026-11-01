@@ -7,7 +7,7 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from src.api.polymarket_client import PolymarketClient
+from src.exchanges.polymarket.adapter import PolymarketAdapter
 from src.utils.api_health_check import APIHealthCheck
 from src.utils.logger import setup_logger
 
@@ -24,7 +24,7 @@ def main():
     
     # Initialize client
     print("Initializing Polymarket client...")
-    client = PolymarketClient(paper_trading=True)
+    client = PolymarketAdapter(paper_trading=True)
     
     # Run health check
     print("\nRunning comprehensive health check...\n")

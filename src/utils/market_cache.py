@@ -4,6 +4,7 @@ import time
 import threading
 from typing import Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from ..exchanges.polymarket.normalizer import best_bid_ask
 from ..utils.logger import setup_logger
 
 
@@ -100,6 +101,21 @@ class MarketCache:
         if not to_fetch:
             return results
         
+        # Prefer the batch endpoint (1 request for N tokens) when available
+        if hasattr(self.polymarket_client, 'get_best_prices_batch'):
+            try:
+                batch = self.polymarket_client.get_best_prices_batch(
+                    [(market_id, outcome) for market_id, outcome, _ in to_fetch]
+                )
+                if batch:
+                    for cache_key, prices in batch.items():
+                        results[cache_key] = prices
+                        self._price_cache[cache_key] = prices
+                        self._price_cache_timestamp[cache_key] = time.time()
+                    return results
+            except Exception as e:
+                logger.debug(f"Batch price fetch failed, falling back: {e}")
+        
         # Fetch remaining prices in parallel
         def fetch_price(args):
             market_id, outcome, cache_key = args
@@ -144,17 +160,13 @@ class MarketCache:
         if hasattr(self.polymarket_client, 'ws_client') and self.polymarket_client.ws_client:
             ws_cache = self.polymarket_client.ws_client.get_orderbook(market_id, outcome)
             if ws_cache:
-                # Convert orderbook to price format
-                bids = ws_cache.get('bids', [])
-                asks = ws_cache.get('asks', [])
-                if bids and asks:
-                    best_bid = float(bids[0].get('price', 0)) if isinstance(bids[0], dict) else float(bids[0][0]) if isinstance(bids[0], list) else None
-                    best_ask = float(asks[0].get('price', 0)) if isinstance(asks[0], dict) else float(asks[0][0]) if isinstance(asks[0], list) else None
-                    if best_bid and best_ask:
-                        prices = {'bid': best_bid, 'ask': best_ask, 'spread': best_ask - best_bid}
-                        self._price_cache[cache_key] = prices
-                        self._price_cache_timestamp[cache_key] = current_time
-                        return prices
+                # Convert orderbook to price format (books arrive unordered)
+                best_bid, best_ask = best_bid_ask(ws_cache)
+                if best_bid and best_ask:
+                    prices = {'bid': best_bid, 'ask': best_ask, 'spread': best_ask - best_bid}
+                    self._price_cache[cache_key] = prices
+                    self._price_cache_timestamp[cache_key] = current_time
+                    return prices
         
         # Check cache first
         if (cache_key in self._price_cache and 

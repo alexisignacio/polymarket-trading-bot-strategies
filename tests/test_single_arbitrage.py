@@ -3,28 +3,35 @@
 import pytest
 from unittest.mock import Mock
 from src.strategies.single_arbitrage import SingleArbitrageStrategy
-from src.api.polymarket_client import PolymarketClient
 from src.risk.risk_manager import RiskManager
 
 
 @pytest.fixture
 def mock_polymarket_client():
     """Create mock Polymarket client"""
-    client = Mock(spec=PolymarketClient)
+    client = Mock()
     client.paper_trading = True
     
     client.get_markets.return_value = [
         {
-            'id': 'market1',
+            'market_id': 'market1',
+            'condition_id': 'market1',
             'question': 'Test market?',
-            'resolution_source': 'official'
+            'description': 'Resolves from official source',
+            'end_date_iso': '2027-01-01T00:00:00Z',
+            'yes_token_id': '111',
+            'no_token_id': '222',
+            'tokens': [
+                {'token_id': '111', 'outcome': 'YES'},
+                {'token_id': '222', 'outcome': 'NO'}
+            ]
         }
     ]
     
     # Mock arbitrage opportunity: YES=0.45, NO=0.50 (total=0.95)
     client.get_best_price.side_effect = [
-        {'ask': 0.45},  # YES
-        {'ask': 0.50}   # NO
+        {'bid': 0.44, 'ask': 0.45},  # YES
+        {'bid': 0.49, 'ask': 0.50}   # NO
     ]
     
     client.place_order.return_value = {

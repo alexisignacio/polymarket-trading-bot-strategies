@@ -105,6 +105,7 @@ class PerpdexClient:
             kwargs['json'] = signed_action
         
         try:
+            kwargs.setdefault('timeout', 15)
             response = self.session.request(method, url, **kwargs)
             response.raise_for_status()
             return response.json()

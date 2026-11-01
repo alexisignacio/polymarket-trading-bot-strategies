@@ -101,16 +101,17 @@ class SpreadScalpingStrategy(BaseStrategy):
                 self.scan_cursor = ""
                 logger.info(f"[{self.name}] Reached end of markets, resetting cursor")
             
+            # Pass 1: cheap filters (volume, status, expiry) -> candidate tokens
+            candidates = []  # (market_id, outcome, token_id)
             for market in markets:
                 market_id = market.get('condition_id') or market.get('id') or market.get('market_id')
                 if not market_id or market_id in self.active_markets:
                     continue
                 
-                # Filter by Volume/Liquidity
-                # Temporarily disabled to test rest of logic
-                # volume = float(market.get('volume', 0) or 0)
-                # if volume < self.min_liquidity:
-                #     continue
+                # Filter by Volume/Liquidity (volume comes from Gamma metadata)
+                volume = market.get('volume')
+                if volume is not None and float(volume) < self.min_liquidity:
+                    continue
                 
                 # Filter by market status - must be accepting orders and not closed
                 if not market.get('enable_order_book', False):
@@ -130,24 +131,27 @@ class SpreadScalpingStrategy(BaseStrategy):
                 if not tokens or len(tokens) < 2:
                     continue
                 
-                # Optimization: Only check price if volume/expiry passed
-                try:
-                    # Check each token (usually YES and NO)
-                    for token in tokens:
-                        token_id = token.get('token_id')
-                        outcome = token.get('outcome', 'UNKNOWN')
-                        
-                        if not token_id:
-                            continue
-                        
-                        # Get orderbook using token_id
-                        price_info = self.polymarket_client.get_best_price(token_id, outcome=outcome)
-                        if self._analyze_opportunity(market_id, outcome, price_info, opportunities):
-                            break # Found opportunity in this market
-                    
-                except Exception as e:
-                    logger.debug(f"Error checking price for {market_id}: {e}")
+                for token in tokens:
+                    token_id = token.get('token_id')
+                    if token_id:
+                        candidates.append((market_id, token.get('outcome', 'UNKNOWN'), token_id))
+            
+            if not candidates:
+                return opportunities
+            
+            # Pass 2: batch-fetch all prices (POST /books) and analyze
+            pairs = [(token_id, outcome) for _, outcome, token_id in candidates]
+            batch = self.polymarket_client.get_best_prices_batch(pairs) \
+                if hasattr(self.polymarket_client, 'get_best_prices_batch') else {}
+            
+            for market_id, outcome, token_id in candidates:
+                if market_id in self.active_markets:
                     continue
+                price_info = batch.get(f"{token_id}_{outcome}")
+                if price_info is None:
+                    price_info = self.polymarket_client.get_best_price(token_id, outcome=outcome)
+                if self._analyze_opportunity(market_id, outcome, price_info, opportunities):
+                    continue  # Found opportunity in this market; keep scanning others
 
         except Exception as e:
             error_logger.error(f"[{self.name}] Error scanning: {e}", exc_info=True)

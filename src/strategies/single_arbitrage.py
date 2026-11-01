@@ -49,6 +49,20 @@ class SingleArbitrageStrategy(BaseStrategy):
                 logger.warning(f"  [{self.name}] get_markets returned non-list: {type(markets)}")
                 return []
             
+            # Prefetch YES/NO prices for all markets in batch (1 request per ~25 tokens)
+            pairs = []
+            for market in markets:
+                if not isinstance(market, dict):
+                    continue
+                mid = market.get('market_id') or market.get('id')
+                if mid:
+                    pairs.append((mid, 'YES'))
+                    pairs.append((mid, 'NO'))
+            if self.market_cache and pairs:
+                prices_map = self.market_cache.get_prices_parallel(pairs)
+            else:
+                prices_map = {}
+            
             for market in markets:
                 # Ensure market is a dict
                 if not isinstance(market, dict):
@@ -58,20 +72,20 @@ class SingleArbitrageStrategy(BaseStrategy):
                 if not market_id:
                     continue
                 
-                # Check resolution clarity if required
+                # Check resolution clarity if required (real CLOB fields:
+                # resolution_source does not exist; end date + description do)
                 if self.require_clear_resolution:
-                    resolution_source = market.get('resolution_source', '')
-                    if not resolution_source or resolution_source.lower() == 'unknown':
+                    if not market.get('end_date_iso') or not market.get('description', '').strip():
                         continue
                 
                 try:
-                    # Get prices for YES and NO (use cache if available)
-                    if self.market_cache:
-                        yes_prices = self.market_cache.get_price(market_id, outcome="YES")
-                        no_prices = self.market_cache.get_price(market_id, outcome="NO")
-                    else:
-                        yes_prices = self.polymarket_client.get_best_price(market_id, outcome="YES")
-                        no_prices = self.polymarket_client.get_best_price(market_id, outcome="NO")
+                    # Get prices for YES and NO (batched above; direct fallback)
+                    yes_prices = prices_map.get(f"{market_id}_YES")
+                    no_prices = prices_map.get(f"{market_id}_NO")
+                    if yes_prices is None:
+                        yes_prices = self.polymarket_client.get_best_price(market_id, outcome="YES") or {}
+                    if no_prices is None:
+                        no_prices = self.polymarket_client.get_best_price(market_id, outcome="NO") or {}
                     
                     yes_ask = yes_prices.get('ask')
                     no_ask = no_prices.get('ask')
@@ -92,7 +106,7 @@ class SingleArbitrageStrategy(BaseStrategy):
                                 'profit': arb_opp['profit'],
                                 'profit_pct': arb_opp['profit_pct'],
                                 'market_question': market.get('question'),
-                                'resolution_source': market.get('resolution_source', '')
+                                'end_date': market.get('end_date_iso')
                             }
                             
                             opportunities.append(opportunity)

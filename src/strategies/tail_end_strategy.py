@@ -51,6 +51,23 @@ class TailEndStrategy(BaseStrategy):
             if not isinstance(markets, list):
                 return []
             
+            # Prefetch prices in batch for all candidate tokens
+            pairs = []
+            pair_tokens = []
+            for market in markets:
+                if not isinstance(market, dict):
+                    continue
+                mid = market.get('market_id') or market.get('id')
+                if not mid:
+                    continue
+                for token in market.get('tokens', []):
+                    tid = token.get('token_id')
+                    outcome = token.get('outcome', 'UNKNOWN')
+                    if tid:
+                        pairs.append((mid, outcome))
+                        pair_tokens.append((mid, tid, outcome))
+            prices_map = self.market_cache.get_prices_parallel(pairs) if (self.market_cache and pairs) else {}
+            
             for market in markets:
                 market_id = market.get('id') or market.get('market_id')
                 if not market_id or market_id in self.active_positions:
@@ -74,11 +91,13 @@ class TailEndStrategy(BaseStrategy):
                         if not token_id:
                             continue
                         
-                        # Get price
-                        if self.market_cache:
-                            price_info = self.market_cache.get_price(market_id, outcome=outcome)
-                        else:
-                            price_info = self.polymarket_client.get_best_price(token_id, outcome=outcome)
+                        # Get price (batched above; direct fallback)
+                        price_info = prices_map.get(f"{market_id}_{outcome}")
+                        if price_info is None:
+                            if self.market_cache:
+                                price_info = self.market_cache.get_price(market_id, outcome=outcome)
+                            else:
+                                price_info = self.polymarket_client.get_best_price(token_id, outcome=outcome)
                             
                         if not price_info:
                             continue

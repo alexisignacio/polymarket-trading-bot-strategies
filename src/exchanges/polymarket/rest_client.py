@@ -4,9 +4,11 @@ import time
 import requests
 from typing import Dict, List, Optional
 from ...api.auth import AuthManager
+from ...api.gamma_client import GammaClient
 from ...api.rate_limiter import RateLimiter
 from ...utils.logger import setup_logger
 from ...utils.market_data_validator import MarketDataValidator
+from .normalizer import normalize_market, best_bid_ask
 
 
 logger = setup_logger(__name__)
@@ -48,16 +50,17 @@ class PolymarketRESTClient:
         })
         
         # Rate limiter
-        self.rate_limiter = RateLimiter(
-            max_calls=100,
-            period=60.0,
-            backoff_factor=2.0,
-            max_backoff=300.0
-        )
+        self.rate_limiter = RateLimiter()
         
         # Validator
         self.validator = MarketDataValidator()
         self.verbose_validation = False
+        
+        # Token resolution index: market_id -> {'YES': token_id, 'NO': token_id}
+        self._token_index: Dict[str, Dict[str, str]] = {}
+        
+        # Metadata (volume/liquidity/created_at) from Gamma - CLOB lacks these
+        self.gamma = GammaClient()
     
     def _request(self, method: str, endpoint: str, **kwargs) -> Dict:
         """Make API request with rate limiting"""
@@ -70,6 +73,7 @@ class PolymarketRESTClient:
         self.rate_limiter.wait_if_needed(endpoint)
         
         try:
+            kwargs.setdefault('timeout', 15)
             response = self.session.request(method, url, **kwargs)
             logger.debug(f"API Response: {method} {endpoint} -> {response.status_code}")
             
@@ -77,7 +81,8 @@ class PolymarketRESTClient:
             if response.status_code == 429:
                 self.rate_limiter.handle_rate_limit_error(endpoint)
                 self.rate_limiter.wait_if_needed(endpoint)
-                response = self.session.request(method, url, **kwargs)
+                kwargs.setdefault('timeout', 15)
+            response = self.session.request(method, url, **kwargs)
             
             response.raise_for_status()
             self.rate_limiter.record_call(endpoint)
@@ -94,7 +99,11 @@ class PolymarketRESTClient:
             raise
     
     def get_markets(self, active: bool = True, limit: int = 100, next_cursor: str = "") -> Dict:
-        """Get list of markets with pagination support
+        """Get list of markets with pagination support.
+        
+        Uses /sampling-markets for active scans: /markets ignores its filters and
+        mostly returns historical/closed markets, while /sampling-markets returns
+        live markets with enabled order books (what strategies can actually trade).
         
         Args:
             active: Filter for active markets
@@ -102,10 +111,10 @@ class PolymarketRESTClient:
             next_cursor: Cursor for pagination (empty string for first page)
             
         Returns:
-            Dict with 'markets' list and 'next_cursor' for pagination
+            Dict with 'markets' list (canonical schema) and 'next_cursor' for pagination
         """
-        endpoint = "/markets"
-        params = {'active': active, 'limit': limit}
+        endpoint = "/sampling-markets" if active else "/markets"
+        params = {'limit': limit}
         if next_cursor:
             params['next_cursor'] = next_cursor
         
@@ -124,8 +133,36 @@ class PolymarketRESTClient:
             # Extract next_cursor from response (API returns it in response)
             next_cursor_value = response.get('next_cursor', None)
             
+            normalized = []
+            for raw in markets or []:
+                market = normalize_market(raw)
+                if market.get('market_id'):
+                    self._token_index[market['market_id']] = {
+                        t['outcome']: t['token_id'] for t in market.get('tokens', [])
+                    }
+                    normalized.append(market)
+            
+            # /sampling-markets ignores 'limit' and returns pages of 1000
+            if limit and len(normalized) > limit:
+                normalized = normalized[:limit]
+            
+            # Enrich with Gamma metadata (volume/liquidity/created_at) when available
+            if normalized:
+                try:
+                    meta = self.gamma.get_metadata(
+                        [m['market_id'] for m in normalized]
+                    )
+                    for market in normalized:
+                        info = meta.get(market['market_id'])
+                        if info:
+                            market['volume'] = info['volume']
+                            market['liquidity'] = info['liquidity']
+                            market['created_at'] = info['created_at']
+                except Exception as e:
+                    logger.debug(f"Gamma enrichment skipped: {e}")
+            
             return {
-                'markets': markets or [],
+                'markets': normalized,
                 'next_cursor': next_cursor_value if next_cursor_value != 'LTE=' else None
             }
         except Exception as e:
@@ -171,15 +208,52 @@ class PolymarketRESTClient:
         
         return all_markets
     
+    def resolve_token_id(self, market_or_token_id: str, outcome: str = "YES") -> Optional[str]:
+        """Resolve a market/condition id + outcome to a token_id.
+        
+        Accepts either an already-resolved token_id (long numeric string) or a
+        market/condition id (0x... or arbitrary), in which case the token is
+        looked up in the index built by get_markets, falling back to a direct
+        /markets/{condition_id} fetch.
+        """
+        if not market_or_token_id:
+            return None
+        
+        # Already a token_id (CLOB token ids are long numeric strings)
+        if market_or_token_id.isdigit() and len(market_or_token_id) > 20:
+            return market_or_token_id
+        
+        outcome_key = (outcome or "YES").upper()
+        if outcome_key not in ("YES", "NO"):
+            outcome_key = "YES"
+        
+        indexed = self._token_index.get(market_or_token_id)
+        if not indexed:
+            try:
+                raw = self._request('GET', f"/markets/{market_or_token_id}")
+                market = normalize_market(raw if isinstance(raw, dict) else {})
+                indexed = {t['outcome']: t['token_id'] for t in market.get('tokens', [])}
+                if indexed:
+                    self._token_index[market_or_token_id] = indexed
+            except Exception as e:
+                logger.debug(f"Token resolution failed for {market_or_token_id}: {e}")
+                return None
+        
+        return indexed.get(outcome_key)
+    
     def get_orderbook(self, token_id: str, outcome: str = "YES") -> Dict:
-        """Get orderbook for a token
+        """Get orderbook for a token or market
         
         Args:
-            token_id: Token ID (not market ID or condition ID)
-            outcome: Outcome name (for logging/reference only)
+            token_id: Token ID, or market/condition id (resolved via outcome)
+            outcome: Outcome name used to resolve the token when needed
         """
+        resolved = self.resolve_token_id(token_id, outcome)
+        if not resolved:
+            logger.debug(f"Could not resolve token for {token_id} {outcome}")
+            return {'bids': [], 'asks': []}
         endpoint = "/book"
-        params = {'token_id': token_id}
+        params = {'token_id': resolved}
         
         try:
             response = self._request('GET', endpoint, params=params)
@@ -197,6 +271,22 @@ class PolymarketRESTClient:
         except Exception as e:
             logger.error(f"Error getting orderbook: {e}", exc_info=True)
             return {'bids': [], 'asks': []}
+    
+    def get_orderbooks(self, token_ids: List[str]) -> List[Dict]:
+        """Batch-fetch orderbooks for many tokens in one request (POST /books).
+        
+        Returns the raw book list (each with 'asset_id', 'bids', 'asks'); empty
+        list on failure so callers can fall back to per-token fetches.
+        """
+        if not token_ids:
+            return []
+        payload = [{'token_id': tid} for tid in token_ids]
+        try:
+            response = self._request('POST', '/books', json=payload)
+            return response if isinstance(response, list) else []
+        except Exception as e:
+            logger.debug(f"Batch orderbook fetch failed: {e}")
+            return []
     
     def place_order(self, market_id: str, outcome: str, side: str, size: float, price: float) -> Dict:
         """Place order.

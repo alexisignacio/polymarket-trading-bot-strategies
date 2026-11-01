@@ -3,7 +3,7 @@
 import time
 from typing import Dict, List, Optional
 from datetime import datetime
-from ..api.polymarket_client import PolymarketClient
+from ..exchanges.polymarket.adapter import PolymarketAdapter
 from ..utils.logger import setup_logger
 from ..utils.market_data_validator import MarketDataValidator
 
@@ -14,14 +14,15 @@ logger = setup_logger(__name__)
 class APIHealthCheck:
     """Check API connectivity and data quality"""
     
-    def __init__(self, polymarket_client: PolymarketClient):
+    def __init__(self, polymarket_client: PolymarketAdapter):
         """
         Initialize health checker.
         
         Args:
             polymarket_client: Polymarket client instance
         """
-        self.client = polymarket_client
+        # Work on the REST client layer (adapter delegates most calls there)
+        self.client = getattr(polymarket_client, 'rest_client', polymarket_client)
         self.validator = MarketDataValidator()
         self.client.verbose_validation = True  # Enable verbose logging for health checks
     
@@ -100,7 +101,8 @@ class APIHealthCheck:
         logger.info("\n[2/4] Checking Markets Endpoint...")
         
         try:
-            markets = self.client.get_markets(active=True, limit=10)
+            result = self.client.get_markets(active=True, limit=10)
+            markets = result.get('markets') if isinstance(result, dict) else result
             
             if not markets:
                 logger.error("✗ No markets returned")
@@ -144,7 +146,8 @@ class APIHealthCheck:
         
         try:
             # First get a market
-            markets = self.client.get_markets(active=True, limit=5)
+            result = self.client.get_markets(active=True, limit=5)
+            markets = result.get('markets') if isinstance(result, dict) else result
             if not markets:
                 return {
                     'status': 'error',

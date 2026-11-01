@@ -14,31 +14,38 @@ logger = setup_logger(__name__)
 class RateLimiter:
     """Rate limiter with exponential backoff"""
     
+    # Real Polymarket CLOB limits (Cloudflare IP-based): general 9000 req/10s,
+    # /book 1500 req/10s. Keep a safety margin below those.
+    GLOBAL_MAX_CALLS = 800
+    GLOBAL_PERIOD = 10.0
+    
     def __init__(
         self,
-        max_calls: int = 100,
-        period: float = 60.0,
+        max_calls: int = None,
+        period: float = None,
         backoff_factor: float = 2.0,
         max_backoff: float = 300.0
     ):
         """
-        Initialize rate limiter.
+        Initialize rate limiter (global window across all endpoints).
         
         Args:
-            max_calls: Maximum number of calls allowed
-            period: Time period in seconds
+            max_calls: Maximum calls per period (default: 800 / 10s)
+            period: Time period in seconds (default: 10)
             backoff_factor: Multiplier for backoff time
             max_backoff: Maximum backoff time in seconds
         """
-        self.max_calls = max_calls
-        self.period = period
+        self.max_calls = max_calls if max_calls is not None else self.GLOBAL_MAX_CALLS
+        self.period = period if period is not None else self.GLOBAL_PERIOD
         self.backoff_factor = backoff_factor
         self.max_backoff = max_backoff
         
-        # Track calls per endpoint
+        # Single global window for counts; backoff still tracked per endpoint
         self.call_history: Dict[str, list] = defaultdict(list)
         self.backoff_until: Dict[str, float] = {}
         self.lock = threading.Lock()
+    
+    _GLOBAL_KEY = '__global__'
     
     def _clean_old_calls(self, endpoint: str) -> None:
         """Remove calls outside the time window"""
@@ -46,8 +53,8 @@ class RateLimiter:
         cutoff = now - self.period
         
         with self.lock:
-            self.call_history[endpoint] = [
-                call_time for call_time in self.call_history[endpoint]
+            self.call_history[self._GLOBAL_KEY] = [
+                call_time for call_time in self.call_history[self._GLOBAL_KEY]
                 if call_time > cutoff
             ]
     
@@ -102,21 +109,23 @@ class RateLimiter:
         # Clean old calls
         self._clean_old_calls(endpoint)
         
-        # Check if we've exceeded rate limit
+        # Check if we've exceeded the global rate limit
         with self.lock:
-            call_count = len(self.call_history[endpoint])
+            history = self.call_history[self._GLOBAL_KEY]
+            call_count = len(history)
+            oldest = history[0] if history else None
         
-        if call_count >= self.max_calls:
-            wait_time = self.period - (time.time() - self.call_history[endpoint][0])
+        if call_count >= self.max_calls and oldest is not None:
+            wait_time = self.period - (time.time() - oldest)
             if wait_time > 0:
-                logger.warning(f"Rate limit reached for {endpoint}, waiting {wait_time:.2f}s")
+                logger.warning(f"Rate limit reached, waiting {wait_time:.2f}s")
                 time.sleep(wait_time)
                 self._clean_old_calls(endpoint)
     
     def record_call(self, endpoint: str) -> None:
         """Record an API call"""
         with self.lock:
-            self.call_history[endpoint].append(time.time())
+            self.call_history[self._GLOBAL_KEY].append(time.time())
         
         # Reset backoff on successful call
         self._reset_backoff(endpoint)
