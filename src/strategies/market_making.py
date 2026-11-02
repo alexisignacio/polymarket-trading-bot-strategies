@@ -266,21 +266,36 @@ class MarketMakingStrategy(BaseStrategy):
             return None
     
     def _get_open_orders(self, market_id: str, outcome: str) -> Dict[str, List[Dict]]:
-        """Get current open orders from exchange"""
+        """Get current open orders (order coordinator first, exchange fallback)"""
         try:
-            orders = self.polymarket_client.get_orders(market_id=market_id, status="open")
+            coordinator = getattr(self.polymarket_client, '_order_coordinator', None)
+            if coordinator:
+                orders = [
+                    {
+                        'order_id': o.order_id,
+                        'market_id': o.market_id,
+                        'outcome': o.outcome,
+                        'side': o.side,
+                        'size': o.size,
+                        'price': o.price
+                    }
+                    for o in coordinator.get_pending_orders(market_id=market_id, strategy=self.name)
+                ]
+            else:
+                orders = self.polymarket_client.get_orders(market_id=market_id, status="open")
             
             # Filter by outcome and organize by side
             buy_orders = []
             sell_orders = []
             
             for order in orders:
-                if order.get('outcome') == outcome or order.get('outcome') == 'YES':
-                    side = order.get('side', '').lower()
-                    if side == 'buy':
-                        buy_orders.append(order)
-                    elif side == 'sell':
-                        sell_orders.append(order)
+                if order.get('outcome') != outcome:
+                    continue
+                side = order.get('side', '').lower()
+                if side == 'buy':
+                    buy_orders.append(order)
+                elif side == 'sell':
+                    sell_orders.append(order)
             
             return {'buy': buy_orders, 'sell': sell_orders}
         
@@ -383,16 +398,19 @@ class MarketMakingStrategy(BaseStrategy):
                         logger.warning(f"Error canceling order {order.order_id}: {e}")
         
         # Step 3: Place new orders to maintain avgAmount
+        # Selling requires inventory: cap sell-side size to what we hold
+        available = self._available_inventory(market_id, outcome) if side == 'sell' else float('inf')
+        
         for i, band in enumerate(bands):
             orders_in_band = orders_in_bands[i]
             total_size = sum(o.size for o in orders_in_band)
             
-            if total_size < band.avg_amount:
+            if total_size < band.avg_amount and available > 0:
                 # Calculate price for new order
                 target_price = self._calculate_target_price(mid_price, side, band.avg_margin)
                 
                 # Calculate size needed
-                size_needed = min(band.avg_amount - total_size, band.max_amount - total_size)
+                size_needed = min(band.avg_amount - total_size, band.max_amount - total_size, available)
                 
                 if size_needed >= self.min_order_size:
                     # Check risk limits
@@ -419,6 +437,8 @@ class MarketMakingStrategy(BaseStrategy):
                             
                             if result and result.get('order_id'):
                                 placed_count += 1
+                                if side == 'sell':
+                                    available -= size_needed
                                 logger.debug(
                                     f"Placed {side} order @ ${target_price:.4f} "
                                     f"size {size_needed:.2f} in band {i}"
@@ -512,11 +532,11 @@ class MarketMakingStrategy(BaseStrategy):
         
         # Sort orders appropriately
         if band_index == 0:
-            # Inner band: cancel closest to market (highest distance for buy, lowest for sell)
-            orders_sorted = sorted(orders_in_band, key=lambda o: o.distance_from_mid, reverse=True)
-        elif band_index == total_bands - 1:
-            # Outer band: cancel furthest from market
+            # Inner band: cancel orders closest to the market first
             orders_sorted = sorted(orders_in_band, key=lambda o: o.distance_from_mid)
+        elif band_index == total_bands - 1:
+            # Outer band: cancel orders furthest from the market first
+            orders_sorted = sorted(orders_in_band, key=lambda o: o.distance_from_mid, reverse=True)
         else:
             # Middle band: cancel smallest first
             orders_sorted = sorted(orders_in_band, key=lambda o: o.size)
@@ -532,6 +552,22 @@ class MarketMakingStrategy(BaseStrategy):
             size_canceled += order.size
         
         return to_cancel
+    
+    def _available_inventory(self, market_id: str, outcome: str) -> float:
+        """USD notional we can still sell: open longs minus pending sell orders."""
+        positions = self.risk_manager.position_tracker.get_positions_by_market(market_id)
+        held = sum(
+            p.size for p in positions
+            if p.side == 'buy' and getattr(p, 'outcome', 'YES') == outcome
+        )
+        coordinator = getattr(self.polymarket_client, '_order_coordinator', None)
+        if coordinator:
+            reserved = sum(
+                o.size for o in coordinator.get_pending_orders(market_id=market_id, strategy=self.name)
+                if o.side == 'sell' and o.outcome == outcome
+            )
+            held -= reserved
+        return max(held, 0.0)
     
     def _calculate_target_price(self, mid_price: float, side: str, margin: float) -> float:
         """Calculate target price for an order based on margin"""

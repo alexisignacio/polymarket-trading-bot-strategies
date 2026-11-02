@@ -139,19 +139,38 @@ class SpreadScalpingStrategy(BaseStrategy):
             if not candidates:
                 return opportunities
             
-            # Pass 2: batch-fetch all prices (POST /books) and analyze
-            pairs = [(token_id, outcome) for _, outcome, token_id in candidates]
-            batch = self.polymarket_client.get_best_prices_batch(pairs) \
-                if hasattr(self.polymarket_client, 'get_best_prices_batch') else {}
+            # Pass 2: batch-fetch all prices (POST /books) and analyze.
+            # Only fill the remaining entry quota so we don't emit dozens of
+            # doomed entries per scan (risk manager would reject them anyway).
+            open_positions = len(
+                self.risk_manager.position_tracker.get_positions_by_strategy(self.name)
+            )
+            entry_quota = max(self.max_positions - open_positions, 0)
+            entries_found = 0
             
-            for market_id, outcome, token_id in candidates:
-                if market_id in self.active_markets:
-                    continue
-                price_info = batch.get(f"{token_id}_{outcome}")
-                if price_info is None:
-                    price_info = self.polymarket_client.get_best_price(token_id, outcome=outcome)
-                if self._analyze_opportunity(market_id, outcome, price_info, opportunities):
-                    continue  # Found opportunity in this market; keep scanning others
+            # Fetch/analyze in chunks and stop as soon as the quota is filled
+            # (fetching prices for 2000 tokens when we can enter 5 is waste)
+            CHUNK = 100
+            for start in range(0, len(candidates), CHUNK):
+                if entries_found >= entry_quota:
+                    break
+                chunk = candidates[start:start + CHUNK]
+                pairs = [(token_id, outcome) for _, outcome, token_id in chunk]
+                batch = self.polymarket_client.get_best_prices_batch(pairs) \
+                    if hasattr(self.polymarket_client, 'get_best_prices_batch') else {}
+                
+                for market_id, outcome, token_id in chunk:
+                    if market_id in self.active_markets:
+                        continue
+                    if entries_found >= entry_quota:
+                        break
+                    price_info = batch.get(f"{token_id}_{outcome}")
+                    if price_info is None:
+                        price_info = self.polymarket_client.get_best_price(token_id, outcome=outcome)
+                    before = len(opportunities)
+                    if self._analyze_opportunity(market_id, outcome, price_info, opportunities):
+                        if len(opportunities) > before:
+                            entries_found += 1
 
         except Exception as e:
             error_logger.error(f"[{self.name}] Error scanning: {e}", exc_info=True)
@@ -174,7 +193,7 @@ class SpreadScalpingStrategy(BaseStrategy):
         """Analyze a specific outcome for spread and probability"""
         if not price_info:
             logger.debug(f"DEBUG: {market_id} {outcome} - No price info")
-        return False
+            return False
 
         bid = float(price_info.get('bid') or 0)
         ask = float(price_info.get('ask') or 0)
@@ -220,7 +239,6 @@ class SpreadScalpingStrategy(BaseStrategy):
             f"   Spread: ${spread:.3f} per share\n"
         )
         logger.info(signal_msg)
-        print(signal_msg) # Ensure it prints to console for user to see immediately
         
         opportunities.append({
             'type': 'entry',
@@ -236,59 +254,53 @@ class SpreadScalpingStrategy(BaseStrategy):
 
     def _manage_existing_positions(self, opportunities: List[Dict]):
         """
-        Check active markets. 
-        If we have shares -> Sell at Ask.
-        If we have open buy order -> Wait.
-        If we have open sell order -> Wait.
+        Check our book (risk manager + order coordinator):
+        - long position without a sell order  -> exit at current ask
+        - pending buy order                   -> block re-entry in that market
         """
-        # This requires tracking state or querying the exchange for all positions
-        # For this implementation, we'll query positions and open orders
-        
         try:
-            positions = self.polymarket_client.get_positions() 
-            # Note: get_positions implementation depends on client. Assuming it returns list of positions.
+            coordinator = getattr(self.polymarket_client, '_order_coordinator', None)
             
-            open_orders = self.polymarket_client.get_orders(status='open')
+            # Rebuild from real state: a market is 'active' while we have a
+            # pending order or an open position there (never grows forever)
+            pending_markets = set()
+            if coordinator:
+                for order in coordinator.get_pending_orders(strategy=self.name):
+                    pending_markets.add(order.market_id)
             
-            # Map market_id -> position/order status
-            # This is complex to synchronize perfectly without a local db, but we'll do best effort
+            position_markets = {
+                p.market_id
+                for p in self.risk_manager.position_tracker.get_positions_by_strategy(self.name)
+                if p.size > 0
+            }
+            self.active_markets = pending_markets | position_markets
             
+            # Open longs of this strategy: list them for sale at the ask
+            positions = self.risk_manager.position_tracker.get_positions_by_strategy(self.name)
             for pos in positions:
-                market_id = pos.get('market_id')
-                size = float(pos.get('size', 0))
-                outcome = pos.get('outcome')
+                if pos.side != 'buy' or pos.size <= 0:
+                    continue
+                market_id = pos.market_id
+                self.active_markets.add(market_id)
+                outcome = getattr(pos, 'outcome', 'YES')
                 
-                if size > 0.1: # We have a position
-                    self.active_markets.add(market_id)
-                    
-                    # Check if we already have a sell order
-                    has_sell_order = False
-                    for order in open_orders:
-                        if order.get('market_id') == market_id and order.get('side') == 'sell':
-                            has_sell_order = True
-                            break
-                    
-                    if not has_sell_order:
-                        # We have shares but no sell order -> Create Sell Opportunity
-                        # Get current ask price to place limit sell
-                        price_info = self.polymarket_client.get_best_price(market_id, outcome=outcome)
-                        ask = float(price_info.get('ask') or 0)
-                        if ask > 0:
-                            opportunities.append({
-                                'type': 'exit',
-                                'market_id': market_id,
-                                'outcome': outcome,
-                                'size': size,
-                                'target_price': ask # Sell at current ask (or ask - 0.01 to be competitive?)
-                                # Strategy says: "list the shares for sale with a limit order as well, using the 8 cent spread"
-                                # Implies we might want to price it based on our entry + spread, or just current market Ask.
-                                # Current market Ask is safer to ensure fill if spread is stable.
-                            })
-                            
-            # Also track markets where we have open BUY orders so we don't double enter
-            for order in open_orders:
-                if order.get('side') == 'buy':
-                    self.active_markets.add(order.get('market_id'))
+                # Skip if a sell order is already pending for this market
+                if coordinator and any(
+                    o.side == 'sell' and o.market_id == market_id
+                    for o in coordinator.get_pending_orders(strategy=self.name)
+                ):
+                    continue
+                
+                price_info = self.polymarket_client.get_best_price(market_id, outcome=outcome)
+                ask = float(price_info.get('ask') or 0)
+                if ask > 0:
+                    opportunities.append({
+                        'type': 'exit',
+                        'market_id': market_id,
+                        'outcome': outcome,
+                        'size': pos.size,
+                        'target_price': ask
+                    })
 
         except Exception as e:
             logger.error(f"Error managing positions: {e}")
@@ -331,9 +343,9 @@ class SpreadScalpingStrategy(BaseStrategy):
                     logger.warning(f"Trade rejected by risk manager: {reason}")
                     
             elif type == 'exit':
-                # Place Limit Sell at Ask (opportunity['size'] is shares held -> USD notional)
+                # Place Limit Sell at Ask (size is USD notional)
                 price = opportunity['target_price']
-                size = opportunity['size'] * price
+                size = opportunity['size']
                 
                 logger.info(f"[{self.name}] Placing EXIT Sell Order: {market_id} {outcome} @ {price}")
                 

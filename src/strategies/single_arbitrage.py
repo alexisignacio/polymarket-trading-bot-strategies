@@ -1,5 +1,6 @@
 """Strategy 4: Single-market arbitrage (YES+NO < $1.00)"""
 
+from datetime import datetime
 from typing import Dict, List, Optional
 from ..strategies.base_strategy import BaseStrategy
 from ..risk.position_tracker import Position
@@ -38,6 +39,9 @@ class SingleArbitrageStrategy(BaseStrategy):
         opportunities = []
         
         try:
+            # Neutralize incomplete legs before looking for new entries
+            self._manage_legs()
+            
             # Use market cache if available
             if self.market_cache:
                 markets = self.market_cache.get_markets(active=True, limit=200)
@@ -115,55 +119,6 @@ class SingleArbitrageStrategy(BaseStrategy):
                     logger.debug(f"Error scanning market {market_id}: {e}")
                     continue
             
-            # Also check multi-choice markets
-            for market in markets:
-                # Ensure market is a dict
-                if not isinstance(market, dict):
-                    continue
-                    
-                market_id = market.get('id') or market.get('market_id')
-                if not market_id:
-                    continue
-                
-                # Check if it's a multi-choice market
-                outcomes = market.get('outcomes', [])
-                if len(outcomes) > 2:
-                    try:
-                        outcome_prices = []
-                        for outcome in outcomes:
-                            # Ensure outcome is a dict
-                            if not isinstance(outcome, dict):
-                                continue
-                                
-                            outcome_token = outcome.get('token_id') or outcome.get('name', '')
-                            if outcome_token:
-                                prices = self.polymarket_client.get_best_price(market_id, outcome=outcome_token)
-                                ask_price = prices.get('ask')
-                                if ask_price:
-                                    outcome_prices.append(ask_price)
-                        
-                        if len(outcome_prices) == len(outcomes):
-                            arb_opp = self.analyzer.find_multi_choice_arbitrage(outcome_prices)
-                            
-                            if arb_opp and arb_opp['total_price'] <= self.max_total_price:
-                                if arb_opp['profit_pct'] >= self.min_profit_pct:
-                                    opportunity = {
-                                        'market_id': market_id,
-                                        'outcome_prices': outcome_prices,
-                                        'outcomes': outcomes,
-                                        'total_price': arb_opp['total_price'],
-                                        'profit': arb_opp['profit'],
-                                        'profit_pct': arb_opp['profit_pct'],
-                                        'market_question': market.get('question'),
-                                        'multi_choice': True
-                                    }
-                                    
-                                    opportunities.append(opportunity)
-                    
-                    except Exception as e:
-                        logger.debug(f"Error scanning multi-choice market {market_id}: {e}")
-                        continue
-        
         except Exception as e:
             logger.error(f"  [{self.name}] Error scanning for arbitrage opportunities: {e}", exc_info=True)
         
@@ -174,6 +129,81 @@ class SingleArbitrageStrategy(BaseStrategy):
             logger.debug(f"  [{self.name}] Top opportunity: Market {opportunities[0].get('market_id', 'unknown')[:20]} | Profit: {opportunities[0].get('profit_pct', 0):.2f}% | Total cost: ${opportunities[0].get('total_price', 0):.4f}")
         
         return opportunities
+    
+    LEG_TIMEOUT_SEC = 60.0
+    
+    def _manage_legs(self) -> None:
+        """Leg risk management: an arbitrage pair must stay balanced.
+        
+        If one leg filled and the other is still pending after a timeout,
+        cancel the pending leg and exit the filled one (market sell at bid)
+        so we never hold directional exposure by accident.
+        """
+        coordinator = getattr(self.polymarket_client, '_order_coordinator', None)
+        if not coordinator:
+            return
+        
+        for position_id, pos in list(self.arbitrage_positions.items()):
+            yes_order = coordinator.get_order(pos.get('yes_order_id') or '')
+            no_order = coordinator.get_order(pos.get('no_order_id') or '')
+            if not yes_order or not no_order:
+                self.arbitrage_positions.pop(position_id, None)
+                continue
+            
+            yes_filled = yes_order.status.value == 'filled'
+            no_filled = no_order.status.value == 'filled'
+            if yes_filled and no_filled:
+                # Pair complete: leave to resolution / normal lifecycle
+                self.arbitrage_positions.pop(position_id, None)
+                continue
+            
+            pending_order = no_order if (yes_filled and not no_filled) else \
+                yes_order if (no_filled and not yes_filled) else None
+            if pending_order is None:
+                continue
+            
+            age = (datetime.now() - pending_order.created_at).total_seconds()
+            if age < self.LEG_TIMEOUT_SEC:
+                continue
+            
+            filled_order = yes_order if yes_filled else no_order
+            logger.warning(
+                f"[{self.name}] Unbalanced legs on {pos['market_id']}: "
+                f"canceling {pending_order.order_id} and exiting {filled_order.order_id}"
+            )
+            
+            # Cancel the unfilled leg
+            try:
+                self.polymarket_client.cancel_order(pending_order.order_id)
+                coordinator.cancel_order(pending_order.order_id)
+            except Exception as e:
+                logger.debug(f"Cancel failed for {pending_order.order_id}: {e}")
+            
+            # Exit the filled leg at current bid
+            try:
+                prices = self.polymarket_client.get_best_price(
+                    pos['market_id'], outcome=filled_order.outcome
+                )
+                bid = prices.get('bid')
+                if bid:
+                    order_coordinator = coordinator
+                    self.polymarket_client.place_order(
+                        market_id=pos['market_id'],
+                        outcome=filled_order.outcome,
+                        side='sell',
+                        size=pos.get('size', self.position_size),
+                        price=bid,
+                        order_coordinator=order_coordinator,
+                        strategy=self.name
+                    )
+                    trade_logger.info(
+                        f"⚖️ [{self.name}] Leg exit: sold {filled_order.outcome} @ {bid:.4f} "
+                        f"on {pos['market_id'][:24]}... (unbalanced pair)"
+                    )
+            except Exception as e:
+                logger.debug(f"Leg exit failed: {e}")
+            
+            self.arbitrage_positions.pop(position_id, None)
     
     def execute_trade(self, opportunity: Dict) -> Optional[Dict]:
         """
@@ -187,11 +217,7 @@ class SingleArbitrageStrategy(BaseStrategy):
         """
         market_id = opportunity['market_id']
         
-        # Check if it's a multi-choice market
-        if opportunity.get('multi_choice'):
-            return self._execute_multi_choice_arbitrage(opportunity)
-        else:
-            return self._execute_binary_arbitrage(opportunity)
+        return self._execute_binary_arbitrage(opportunity)
     
     def _execute_binary_arbitrage(self, opportunity: Dict) -> Optional[Dict]:
         """Execute binary market arbitrage (YES/NO)"""
@@ -291,95 +317,3 @@ class SingleArbitrageStrategy(BaseStrategy):
         except Exception as e:
             error_logger.error(f"Error executing binary arbitrage: {e}", exc_info=True)
             return None
-    
-    def _execute_multi_choice_arbitrage(self, opportunity: Dict) -> Optional[Dict]:
-        """Execute multi-choice market arbitrage"""
-        market_id = opportunity['market_id']
-        outcomes = opportunity['outcomes']
-        outcome_prices = opportunity['outcome_prices']
-        
-        orders = []
-        order_coordinator = getattr(self.polymarket_client, '_order_coordinator', None)
-        
-        try:
-            # Place orders for all outcomes
-            for i, outcome in enumerate(outcomes):
-                outcome_token = outcome.get('token_id') or outcome.get('name', '')
-                price = outcome_prices[i]
-                
-                # Check risk
-                allowed, reason = self.risk_manager.check_trade_allowed(
-                    strategy=self.name,
-                    market_id=market_id,
-                    size=self.position_size,
-                    price=price,
-                    side='buy'
-                )
-                
-                if not allowed:
-                    # Cancel all previous orders
-                    for order in orders:
-                        if 'order_id' in order:
-                            self.polymarket_client.cancel_order(order['order_id'])
-                    logger.debug(f"Multi-choice arbitrage not allowed for outcome {outcome_token}: {reason}")
-                    return None
-                
-                order = self.polymarket_client.place_order(
-                    market_id=market_id,
-                    outcome=outcome_token,
-                    side='buy',
-                    size=self.position_size,
-                    price=price,
-                    order_coordinator=order_coordinator,
-                    strategy=self.name
-                )
-                
-                if not order:
-                    # Cancel all previous orders
-                    for prev_order in orders:
-                        if 'order_id' in prev_order:
-                            self.polymarket_client.cancel_order(prev_order['order_id'])
-                    return None
-                
-                orders.append(order)
-            
-            # Track position
-            position_id = self._generate_position_id()
-            
-            self.arbitrage_positions[position_id] = {
-                'market_id': market_id,
-                'orders': orders,
-                'outcome_prices': outcome_prices,
-                'total_price': opportunity['total_price'],
-                'expected_profit': opportunity['profit'],
-                'size': self.position_size
-            }
-            
-            trade_logger.info("=" * 80)
-            trade_logger.info(f"🎯 TRADE EXECUTED: Multi-choice Arbitrage | {position_id}")
-            trade_logger.info(f"   Market: {market_id[:30]}... | Outcomes: {len(outcomes)}")
-            trade_logger.info(f"   Total Cost: ${opportunity['total_price']:.4f}")
-            trade_logger.info(f"   Expected Profit: ${opportunity['profit']:.4f} ({opportunity['profit_pct']:.2f}%)")
-            trade_logger.info(f"   Size: ${self.position_size:.2f} per outcome")
-            trade_logger.info("=" * 80)
-            
-            return {
-                'position_id': position_id,
-                'strategy': self.name,
-                'market_id': market_id,
-                'orders': orders,
-                'expected_profit': opportunity['profit'],
-                'expected_profit_pct': opportunity['profit_pct']
-            }
-        
-        except Exception as e:
-            error_logger.error(f"Error executing multi-choice arbitrage: {e}", exc_info=True)
-            # Cancel any orders that were placed
-            for order in orders:
-                if 'order_id' in order:
-                    try:
-                        self.polymarket_client.cancel_order(order['order_id'])
-                    except:
-                        pass
-            return None
-

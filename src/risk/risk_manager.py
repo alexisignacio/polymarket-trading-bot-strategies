@@ -34,6 +34,9 @@ class RiskManager:
         # Track initial capital for drawdown calculation
         self.initial_capital = config.get('initial_capital', 10000.0)
         self.peak_capital = self.initial_capital
+        
+        # Set by the bot so pending orders count as in-flight exposure
+        self.order_coordinator = None
     
     def check_trade_allowed(
         self,
@@ -79,9 +82,12 @@ class RiskManager:
         if strategy_exposure + trade_value > self.max_per_strategy_exposure:
             return False, f"Strategy exposure ${strategy_exposure + trade_value:.2f} exceeds limit ${self.max_per_strategy_exposure:.2f}"
         
-        # Check open position count
-        if self.position_tracker.get_open_position_count() >= self.max_open_positions:
-            return False, f"Open positions {self.position_tracker.get_open_position_count()} exceeds limit {self.max_open_positions}"
+        # Check open position count (open positions + pending orders in flight)
+        open_count = self.position_tracker.get_open_position_count()
+        if self.order_coordinator:
+            open_count += len(self.order_coordinator.get_pending_orders())
+        if open_count >= self.max_open_positions:
+            return False, f"Open positions {open_count} exceeds limit {self.max_open_positions}"
         
         # Check drawdown
         current_capital = self.initial_capital + self.position_tracker.get_total_pnl()

@@ -204,11 +204,19 @@ class PolymarketAdapter(BaseExchange):
         if not resolved:
             return {}
         
+        chunks = [
+            [tid for _, tid in resolved[i:i + 100]]
+            for i in range(0, len(resolved), 100)
+        ]
         books = []
-        for i in range(0, len(resolved), 100):
-            books.extend(self.rest_client.get_orderbooks(
-                [tid for _, tid in resolved[i:i + 100]]
-            ))
+        if len(chunks) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(len(chunks), 8)) as pool:
+                for result in pool.map(self.rest_client.get_orderbooks, chunks):
+                    books.extend(result)
+        else:
+            for chunk in chunks:
+                books.extend(self.rest_client.get_orderbooks(chunk))
         by_asset = {str(b.get('asset_id')): b for b in books if isinstance(b, dict)}
         
         results = {}

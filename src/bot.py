@@ -89,8 +89,9 @@ class TradingBot:
         risk_config = self.config_loader.get_risk_config()
         self.risk_manager = RiskManager(risk_config)
         
-        # Initialize order coordinator
+        # Initialize order coordinator (wired into risk manager as in-flight exposure)
         self.order_coordinator = OrderCoordinator()
+        self.risk_manager.order_coordinator = self.order_coordinator
         # Attach to client so strategies can use it
         if hasattr(self.polymarket_client, '_order_coordinator'):
             self.polymarket_client._order_coordinator = self.order_coordinator
@@ -371,12 +372,25 @@ class TradingBot:
     
     def _check_stop_losses(self) -> None:
         """Check all positions for stop loss triggers"""
-        for position_id, position in list(self.risk_manager.position_tracker.positions.items()):
+        positions = list(self.risk_manager.position_tracker.positions.items())
+        if not positions:
+            return
+        
+        # Batch price lookup: one request for all positions instead of N
+        pairs = [(p.market_id, getattr(p, 'outcome', 'YES')) for _, p in positions]
+        if hasattr(self.polymarket_client, 'get_best_prices_batch'):
+            prices_map = self.polymarket_client.get_best_prices_batch(pairs)
+        else:
+            prices_map = {}
+        
+        for position_id, position in positions:
             try:
                 # Get current price for the position's actual outcome
                 outcome = getattr(position, 'outcome', 'YES')
-                prices = self.polymarket_client.get_best_price(position.market_id, outcome=outcome)
-                current_price = prices.get('bid') or prices.get('ask')
+                prices = prices_map.get(f"{position.market_id}_{outcome}")
+                if prices is None:
+                    prices = self.polymarket_client.get_best_price(position.market_id, outcome=outcome)
+                current_price = (prices or {}).get('bid') or (prices or {}).get('ask')
                 
                 if current_price and self.risk_manager.check_stop_loss(position_id, current_price):
                     # Close position for real (fills book + P&L + trade record)
