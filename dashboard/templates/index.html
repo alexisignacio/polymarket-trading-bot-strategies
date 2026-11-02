@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PolyHFT Dashboard | Polymarket Trading Bot</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              900: '#0f172a',
+              950: '#020617',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+  </style>
+</head>
+<body class="bg-[#0b0f19] text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-indigo-500 selection:text-white">
+
+  <!-- Top Navigation Bar -->
+  <header class="border-b border-slate-800 bg-[#0f172a]/80 backdrop-blur sticky top-0 z-50 px-6 py-3.5 flex items-center justify-between">
+    <div class="flex items-center space-x-4">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+        <i class="fa-solid fa-chart-line text-lg text-white"></i>
+      </div>
+      <div>
+        <div class="flex items-center space-x-2">
+          <h1 class="text-lg font-bold tracking-tight text-white">PolyHFT</h1>
+          <span class="text-xs px-2 py-0.5 rounded-full font-medium bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">v1.0 Pro</span>
+        </div>
+        <p class="text-xs text-slate-400">Polymarket High-Frequency Algorithmic Bot</p>
+      </div>
+    </div>
+
+    <!-- Status & Quick Controls -->
+    <div class="flex items-center space-x-3">
+      <!-- Status Badge -->
+      <div id="statusBadge" class="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/60 text-xs">
+        <span class="w-2.5 h-2.5 rounded-full bg-slate-500 animate-pulse" id="statusDot"></span>
+        <span id="statusText" class="font-medium text-slate-300">Conectando...</span>
+      </div>
+
+      <!-- Mode Badge -->
+      <div id="modeBadge" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
+        <i class="fa-solid fa-flask"></i>
+        <span>Paper Trading</span>
+      </div>
+
+      <!-- Start/Stop Button -->
+      <button id="toggleBotBtn" onclick="toggleBotExecution()" class="flex items-center space-x-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all shadow-md bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer active:scale-95">
+        <i class="fa-solid fa-play" id="toggleBotIcon"></i>
+        <span id="toggleBotText">Iniciar Bot</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content Layout -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
+
+    <!-- Metrics Cards Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      
+      <!-- Total P&L Card -->
+      <div class="bg-[#111827]/80 border border-slate-800/80 rounded-2xl p-5 shadow-sm hover:border-slate-700 transition">
+        <div class="flex justify-between items-start mb-2">
+          <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">P&L Total</span>
+          <div class="p-2 rounded-lg bg-slate-800/60 text-slate-400">
+            <i class="fa-solid fa-wallet text-sm"></i>
+          </div>
+        </div>
+        <div class="flex items-baseline space-x-2">
+          <span id="metricPnl" class="text-2xl font-black tracking-tight text-white">$0.00</span>
+          <span id="metricPnlPct" class="text-xs font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">+0.0%</span>
+        </div>
+        <div class="mt-2 text-xs text-slate-500 flex justify-between">
+          <span>Realizado: <strong id="metricRealizedPnl" class="text-slate-300">$0.00</strong></span>
+          <span>No realizado: <strong id="metricUnrealizedPnl" class="text-slate-300">$0.00</strong></span>
+        </div>
+      </div>
+
+      <!-- Capital & Balance Card -->
+      <div class="bg-[#111827]/80 border border-slate-800/80 rounded-2xl p-5 shadow-sm hover:border-slate-700 transition">
+        <div class="flex justify-between items-start mb-2">
+          <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Capital Total</span>
+          <div class="p-2 rounded-lg bg-slate-800/60 text-indigo-400">
+            <i class="fa-solid fa-coins text-sm"></i>
+          </div>
+        </div>
+        <div class="flex items-baseline space-x-2">
+          <span id="metricCapital" class="text-2xl font-black tracking-tight text-white">$100.00</span>
+          <span class="text-xs font-medium text-slate-400">USD</span>
+        </div>
+        <div class="mt-2 text-xs text-slate-500 flex justify-between">
+          <span>Capital Inicial: <span id="metricInitialCapital" class="text-slate-300">$100.00</span></span>
+        </div>
+      </div>
+
+      <!-- Positions & Exposure Card -->
+      <div class="bg-[#111827]/80 border border-slate-800/80 rounded-2xl p-5 shadow-sm hover:border-slate-700 transition">
+        <div class="flex justify-between items-start mb-2">
+          <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Posiciones Abiertas</span>
+          <div class="p-2 rounded-lg bg-slate-800/60 text-cyan-400">
+            <i class="fa-solid fa-layer-group text-sm"></i>
+          </div>
+        </div>
+        <div class="flex items-baseline space-x-2">
+          <span id="metricOpenPositions" class="text-2xl font-black tracking-tight text-white">0</span>
+          <span class="text-xs text-slate-400">activas</span>
+        </div>
+        <div class="mt-2 text-xs text-slate-500 flex justify-between">
+          <span>Exposición Total: <strong id="metricExposure" class="text-slate-300">$0.00</strong></span>
+        </div>
+      </div>
+
+      <!-- Trades & Winrate Card -->
+      <div class="bg-[#111827]/80 border border-slate-800/80 rounded-2xl p-5 shadow-sm hover:border-slate-700 transition">
+        <div class="flex justify-between items-start mb-2">
+          <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Trades / Win Rate</span>
+          <div class="p-2 rounded-lg bg-slate-800/60 text-amber-400">
+            <i class="fa-solid fa-trophy text-sm"></i>
+          </div>
+        </div>
+        <div class="flex items-baseline space-x-2">
+          <span id="metricTotalTrades" class="text-2xl font-black tracking-tight text-white">0</span>
+          <span class="text-xs text-slate-400">ejecutados</span>
+        </div>
+        <div class="mt-2 text-xs text-slate-500 flex justify-between">
+          <span>Win Rate: <strong id="metricWinRate" class="text-emerald-400">0.0%</strong></span>
+          <span>Uptime: <strong id="metricUptime" class="text-slate-300">0m</strong></span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Chart & Open Positions Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      
+      <!-- Performance Chart (2 cols) -->
+      <div class="lg:col-span-2 bg-[#111827]/80 border border-slate-800/80 rounded-2xl p-5 shadow-sm flex flex-col">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-sm font-bold text-white tracking-wide">Rendimiento P&L en Tiempo Real</h2>
+            <p class="text-xs text-slate-400">Evolución del balance y beneficio acumulado</p>
+          </div>
+          <span class="text-xs px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700/60">
+            <i class="fa-solid fa-arrows-rotate mr-1 text-slate-400"></i> Auto-actualizado
+          </span>
+        </div>
+        <div class="flex-1 w-full min-h-[220px]">
+          <canvas id="pnlChart"></canvas>
+        </div>
+      </div>
+
+      <!-- System Quick Info & Bot Engine (1 col) -->
+      <div class="bg-[#111827]/80 border border-slate-800/80 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+        <div>
+          <h2 class="text-sm font-bold text-white tracking-wide mb-3">Motor PolyHFT</h2>
+          
+          <div class="space-y-3 text-xs">
+            <div class="flex justify-between items-center py-2 border-b border-slate-800">
+              <span class="text-slate-400">Estado del Proceso:</span>
+              <span id="infoBotProcess" class="font-semibold text-slate-300">Detenido</span>
+            </div>
+            <div class="flex justify-between items-center py-2 border-b border-slate-800">
+              <span class="text-slate-400">PID del Proceso:</span>
+              <span id="infoBotPid" class="font-mono text-slate-300">-</span>
+            </div>
+            <div class="flex justify-between items-center py-2 border-b border-slate-800">
+              <span class="text-slate-400">WebSocket CLOB:</span>
+              <span class="text-emerald-400 font-semibold flex items-center"><i class="fa-solid fa-check-circle mr-1"></i> Conectado</span>
+            </div>
+            <div class="flex justify-between items-center py-2 border-b border-slate-800">
+              <span class="text-slate-400">Intervalo de Polling:</span>
+              <span class="text-slate-300 font-mono">5.0 seg</span>
+            </div>
+            <div class="flex justify-between items-center py-2 border-b border-slate-800">
+              <span class="text-slate-400">Gestor de Riesgo:</span>
+              <span class="text-emerald-400 font-semibold"><i class="fa-solid fa-shield-halved mr-1"></i> Activo (Stop-loss 10%)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4 pt-3 border-t border-slate-800">
+          <p class="text-[11px] text-slate-500 leading-relaxed">
+            💡 <strong>Modo Simulado:</strong> Los trades se generan a partir de precios y volúmenes reales de Polymarket mediante WebSocket sin arriesgar saldo real.
+          </p>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Active Positions Table -->
+    <div class="bg-[#111827]/80 border border-slate-800/80 rounded-2xl p-5 shadow-sm">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-sm font-bold text-white tracking-wide">Posiciones Abiertas</h2>
+          <p class="text-xs text-slate-400">Contratos actualmente retenidos en cartera</p>
+        </div>
+        <span id="positionsCountBadge" class="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+          0 abiertas
+        </span>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs text-slate-300">
+          <thead class="bg-slate-800/50 uppercase text-[11px] text-slate-400 font-semibold tracking-wider">
+            <tr>
+              <th class="py-2.5 px-4 rounded-l-lg">Mercado / Pregunta</th>
+              <th class="py-2.5 px-3">Estrategia</th>
+              <th class="py-2.5 px-3">Lado</th>
+              <th class="py-2.5 px-3">Cantidad</th>
+              <th class="py-2.5 px-3">Precio Entrada</th>
+              <th class="py-2.5 px-3">Precio Actual</th>
+              <th class="py-2.5 px-4 rounded-r-lg text-right">P&L No Realizado</th>
+            </tr>
+          </thead>
+          <tbody id="positionsTableBody" class="divide-y divide-slate-800">
+            <tr>
+              <td colspan="7" class="py-6 text-center text-slate-500">
+                <i class="fa-solid fa-inbox text-lg mb-1 block"></i>
+                No hay posiciones abiertas en este momento
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Strategy Control Section -->
+    <div class="bg-[#111827]/80 border border-slate-800/80 rounded-2xl p-5 shadow-sm">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-sm font-bold text-white tracking-wide">Control de Estrategias (10 Disponibles)</h2>
+          <p class="text-xs text-slate-400">Activa o desactiva algoritmos en caliente con un clic</p>
+        </div>
+        <span class="text-xs text-slate-400"><i class="fa-solid fa-sliders mr-1"></i> Sincronizado con config.yaml</span>
+      </div>
+
+      <div id="strategiesGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+        <!-- Dynamically injected strategy cards -->
+        <div class="p-4 rounded-xl bg-slate-800/40 border border-slate-800 animate-pulse text-xs text-slate-500 text-center">
+          Cargando estrategias...
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Terminal / Logs Section -->
+    <div class="bg-[#111827]/80 border border-slate-800/80 rounded-2xl p-5 shadow-sm">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center space-x-3">
+          <h2 class="text-sm font-bold text-white tracking-wide">Consola de Eventos y Logs</h2>
+          <div class="flex space-x-1 bg-slate-800 p-0.5 rounded-lg text-xs">
+            <button onclick="setLogTab('trades')" id="tabTradesBtn" class="px-3 py-1 rounded-md font-medium text-white bg-indigo-600 transition">
+              Trades & Operaciones
+            </button>
+            <button onclick="setLogTab('bot')" id="tabBotBtn" class="px-3 py-1 rounded-md font-medium text-slate-400 hover:text-white transition">
+              Log Completo
+            </button>
+          </div>
+        </div>
+        <button onclick="fetchLogs()" class="text-xs text-slate-400 hover:text-slate-200">
+          <i class="fa-solid fa-arrows-rotate mr-1"></i> Refrescar
+        </button>
+      </div>
+
+      <div id="logViewer" class="bg-[#090d16] font-mono text-xs text-slate-300 p-4 rounded-xl h-64 overflow-y-auto border border-slate-800/90 leading-relaxed">
+        <div class="text-slate-500 italic">Esperando eventos del bot...</div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-800/80 bg-[#0f172a]/60 py-4 px-6 text-center text-xs text-slate-500">
+    PolyHFT Bot Dashboard • Diseñado para Polymarket CLOB • Modo Paper Trading
+  </footer>
+
+  <!-- Application Logic -->
+  <script>
+    let currentLogTab = 'trades';
+    let pnlChartInstance = null;
+    let chartHistory = [];
+
+    // Initialize Chart
+    function initChart() {
+      const ctx = document.getElementById('pnlChart').getContext('2d');
+      pnlChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: 'P&L Acumulado ($)',
+            data: [],
+            borderColor: '#6366f1',
+            backgroundColor: 'rgba(99, 102, 241, 0.1)',
+            fill: true,
+            tension: 0.3,
+            borderWidth: 2,
+            pointRadius: 2,
+            pointHoverRadius: 5
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(255,255,255,0.04)' },
+              ticks: { color: '#64748b', font: { size: 10 } }
+            },
+            y: {
+              grid: { color: 'rgba(255,255,255,0.04)' },
+              ticks: {
+                color: '#64748b',
+                font: { size: 10 },
+                callback: (val) => '$' + val.toFixed(2)
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // Fetch Status
+    async function fetchStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        
+        const isRunning = data.is_running;
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const toggleBtn = document.getElementById('toggleBotBtn');
+        const toggleIcon = document.getElementById('toggleBotIcon');
+        const toggleText = document.getElementById('toggleBotText');
+        const infoBotProcess = document.getElementById('infoBotProcess');
+        const infoBotPid = document.getElementById('infoBotPid');
+
+        if (isRunning) {
+          statusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
+          statusText.textContent = 'En Ejecución';
+          statusText.className = 'font-medium text-emerald-400';
+          
+          toggleBtn.className = 'flex items-center space-x-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all shadow-md bg-rose-600 hover:bg-rose-500 text-white cursor-pointer active:scale-95';
+          toggleIcon.className = 'fa-solid fa-stop';
+          toggleText.textContent = 'Detener Bot';
+          
+          infoBotProcess.textContent = 'Activo';
+          infoBotProcess.className = 'font-semibold text-emerald-400';
+          infoBotPid.textContent = data.pid || 'running';
+        } else {
+          statusDot.className = 'w-2.5 h-2.5 rounded-full bg-slate-500';
+          statusText.textContent = 'Detenido';
+          statusText.className = 'font-medium text-slate-400';
+
+          toggleBtn.className = 'flex items-center space-x-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all shadow-md bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer active:scale-95';
+          toggleIcon.className = 'fa-solid fa-play';
+          toggleText.textContent = 'Iniciar Bot';
+
+          infoBotProcess.textContent = 'Detenido';
+          infoBotProcess.className = 'font-semibold text-slate-400';
+          infoBotPid.textContent = '-';
+        }
+
+        const mins = Math.floor(data.uptime_seconds / 60);
+        document.getElementById('metricUptime').textContent = mins + 'm';
+
+      } catch (err) {
+        console.error('Error fetching status:', err);
+      }
+    }
+
+    // Toggle Bot Execution
+    async function toggleBotExecution() {
+      const toggleBtn = document.getElementById('toggleBotBtn');
+      const toggleText = document.getElementById('toggleBotText');
+      const isStarting = toggleText.textContent.includes('Iniciar');
+
+      toggleBtn.disabled = true;
+      toggleBtn.classList.add('opacity-50');
+
+      try {
+        const endpoint = isStarting ? '/api/bot/start' : '/api/bot/stop';
+        const res = await fetch(endpoint, { method: 'POST' });
+        const result = await res.json();
+        await fetchStatus();
+        await fetchLogs();
+      } catch (err) {
+        alert('Error cambiando estado del bot: ' + err);
+      } finally {
+        toggleBtn.disabled = false;
+        toggleBtn.classList.remove('opacity-50');
+      }
+    }
+
+    // Fetch Metrics
+    async function fetchMetrics() {
+      try {
+        const res = await fetch('/api/metrics');
+        const data = await res.json();
+
+        // PNL formatting
+        const pnlEl = document.getElementById('metricPnl');
+        const pnlPctEl = document.getElementById('metricPnlPct');
+        const isPos = data.total_pnl >= 0;
+
+        pnlEl.textContent = (isPos ? '+' : '') + '$' + data.total_pnl.toFixed(2);
+        pnlEl.className = 'text-2xl font-black tracking-tight ' + (isPos ? 'text-emerald-400' : 'text-rose-400');
+
+        pnlPctEl.textContent = (isPos ? '+' : '') + data.total_pnl_pct.toFixed(2) + '%';
+        pnlPctEl.className = 'text-xs font-bold px-1.5 py-0.5 rounded ' + (isPos ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400');
+
+        document.getElementById('metricRealizedPnl').textContent = '$' + data.realized_pnl.toFixed(2);
+        document.getElementById('metricUnrealizedPnl').textContent = '$' + data.unrealized_pnl.toFixed(2);
+
+        document.getElementById('metricCapital').textContent = '$' + data.current_capital.toFixed(2);
+        document.getElementById('metricInitialCapital').textContent = '$' + data.initial_capital.toFixed(2);
+
+        document.getElementById('metricOpenPositions').textContent = data.open_positions_count;
+        document.getElementById('metricExposure').textContent = '$' + data.total_exposure.toFixed(2);
+
+        document.getElementById('metricTotalTrades').textContent = data.total_trades;
+        document.getElementById('metricWinRate').textContent = data.win_rate.toFixed(1) + '%';
+
+        // Update chart
+        const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        if (pnlChartInstance) {
+          if (pnlChartInstance.data.labels.length > 20) {
+            pnlChartInstance.data.labels.shift();
+            pnlChartInstance.data.datasets[0].data.shift();
+          }
+          pnlChartInstance.data.labels.push(nowStr);
+          pnlChartInstance.data.datasets[0].data.push(data.total_pnl);
+          pnlChartInstance.update();
+        }
+
+      } catch (err) {
+        console.error('Error fetching metrics:', err);
+      }
+    }
+
+    // Fetch Positions
+    async function fetchPositions() {
+      try {
+        const res = await fetch('/api/positions');
+        const positions = await res.json();
+        const tbody = document.getElementById('positionsTableBody');
+        document.getElementById('positionsCountBadge').textContent = positions.length + ' abiertas';
+
+        if (!positions || positions.length === 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="7" class="py-6 text-center text-slate-500">
+                <i class="fa-solid fa-inbox text-lg mb-1 block"></i>
+                No hay posiciones abiertas en este momento
+              </td>
+            </tr>`;
+          return;
+        }
+
+        tbody.innerHTML = positions.map(pos => {
+          const pnl = pos.unrealized_pnl || 0;
+          const pnlClass = pnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
+          const sideBadge = pos.side === 'YES' || pos.outcome === 'YES' 
+            ? '<span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20">YES</span>'
+            : '<span class="px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20">NO</span>';
+
+          return `
+            <tr class="hover:bg-slate-800/30 transition">
+              <td class="py-3 px-4 font-medium text-slate-200 max-w-xs truncate">${escapeHtml(pos.market_question || pos.market_id)}</td>
+              <td class="py-3 px-3 text-slate-400 capitalize">${escapeHtml((pos.strategy || 'scalping').replace('_', ' '))}</td>
+              <td class="py-3 px-3">${sideBadge}</td>
+              <td class="py-3 px-3 font-mono">${pos.size || 0}</td>
+              <td class="py-3 px-3 font-mono">$${(pos.entry_price || 0).toFixed(3)}</td>
+              <td class="py-3 px-3 font-mono">$${(pos.current_price || pos.entry_price || 0).toFixed(3)}</td>
+              <td class="py-3 px-4 text-right font-mono font-bold ${pnlClass}">$${pnl.toFixed(2)}</td>
+            </tr>`;
+        }).join('');
+
+      } catch (err) {
+        console.error('Error fetching positions:', err);
+      }
+    }
+
+    // Fetch Strategies
+    async function fetchStrategies() {
+      try {
+        const res = await fetch('/api/strategies');
+        const strategies = await res.json();
+        const grid = document.getElementById('strategiesGrid');
+
+        grid.innerHTML = strategies.map(strat => {
+          const isEnabled = strat.enabled;
+          return `
+            <div class="p-4 rounded-xl bg-slate-800/40 border border-slate-800 hover:border-slate-700 transition flex flex-col justify-between">
+              <div>
+                <div class="flex items-start justify-between mb-1.5">
+                  <h3 class="font-bold text-slate-100 text-xs">${escapeHtml(strat.name)}</h3>
+                  <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" onchange="toggleStrategy('${escapeHtml(strat.id)}', this.checked)" class="sr-only peer" ${isEnabled ? 'checked' : ''}>
+                    <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                  </label>
+                </div>
+                <p class="text-[11px] text-slate-400 leading-snug mb-3">${escapeHtml(strat.description)}</p>
+              </div>
+              <div class="pt-2 border-t border-slate-800/60 flex items-center justify-between text-[10px] text-slate-500">
+                <span>Estado: <strong class="${isEnabled ? 'text-emerald-400' : 'text-slate-500'}">${isEnabled ? 'Activo' : 'Pausado'}</strong></span>
+                <span class="font-mono">ID: ${escapeHtml(strat.id)}</span>
+              </div>
+            </div>`;
+        }).join('');
+
+      } catch (err) {
+        console.error('Error fetching strategies:', err);
+      }
+    }
+
+    // Toggle Strategy
+    async function toggleStrategy(id, enabled) {
+      try {
+        const res = await fetch('/api/strategies/toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, enabled })
+        });
+        const result = await res.json();
+        if (result.success) {
+          await fetchStrategies();
+        }
+      } catch (err) {
+        alert('Error cambiando estado de estrategia: ' + err);
+      }
+    }
+
+    // Logs & Terminal Tabs
+    function setLogTab(tab) {
+      currentLogTab = tab;
+      const tabTradesBtn = document.getElementById('tabTradesBtn');
+      const tabBotBtn = document.getElementById('tabBotBtn');
+
+      if (tab === 'trades') {
+        tabTradesBtn.className = 'px-3 py-1 rounded-md font-medium text-white bg-indigo-600 transition';
+        tabBotBtn.className = 'px-3 py-1 rounded-md font-medium text-slate-400 hover:text-white transition';
+      } else {
+        tabBotBtn.className = 'px-3 py-1 rounded-md font-medium text-white bg-indigo-600 transition';
+        tabTradesBtn.className = 'px-3 py-1 rounded-md font-medium text-slate-400 hover:text-white transition';
+      }
+      fetchLogs();
+    }
+
+    async function fetchLogs() {
+      try {
+        const res = await fetch('/api/logs?kind=' + currentLogTab + '&limit=100');
+        const data = await res.json();
+        const viewer = document.getElementById('logViewer');
+
+        if (!data.lines || data.lines.length === 0) {
+          viewer.innerHTML = '<div class="text-slate-500 italic">No hay registros aún en este log.</div>';
+          return;
+        }
+
+        viewer.innerHTML = data.lines.map(line => {
+          let color = 'text-slate-300';
+          if (line.includes('ERROR') || line.includes('Failed') || line.includes('rejected')) color = 'text-rose-400';
+          else if (line.includes('Trade') || line.includes('profit') || line.includes('Order') || line.includes('PAPER')) color = 'text-emerald-400';
+          else if (line.includes('WARNING') || line.includes('Stop loss')) color = 'text-amber-400';
+          else if (line.includes('WebSocket') || line.includes('Initialized')) color = 'text-indigo-400';
+
+          return `<div class="${color}">${escapeHtml(line)}</div>`;
+        }).join('');
+
+        // Auto-scroll to bottom
+        viewer.scrollTop = viewer.scrollHeight;
+      } catch (err) {
+        console.error('Error fetching logs:', err);
+      }
+    }
+
+    function escapeHtml(text) {
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    // Startup & Polling Loop
+    window.addEventListener('DOMContentLoaded', () => {
+      initChart();
+      fetchStatus();
+      fetchMetrics();
+      fetchPositions();
+      fetchStrategies();
+      fetchLogs();
+
+      // Poll every 2.5 seconds
+      setInterval(() => {
+        fetchStatus();
+        fetchMetrics();
+        fetchPositions();
+      }, 2500);
+
+      // Poll logs every 3 seconds
+      setInterval(fetchLogs, 3000);
+    });
+  </script>
+</body>
+</html>
