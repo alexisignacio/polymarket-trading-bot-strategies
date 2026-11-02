@@ -1,6 +1,5 @@
 """Strategy 4: Tail-End Trading (High Probability & Near Expiry)"""
 
-import time
 from typing import Dict, List, Optional
 from datetime import datetime
 from dateutil import parser
@@ -280,7 +279,7 @@ class TailEndStrategy(BaseStrategy):
 
             if order and order.get('order_id'):
                 trade_logger.info("=" * 80)
-                trade_logger.info(f"🎯 TRADE EXECUTED: Tail-End Strategy")
+                trade_logger.info("🎯 TRADE EXECUTED: Tail-End Strategy")
                 trade_logger.info(f"   Market: {market_id}")
                 trade_logger.info(f"   Outcome: {outcome} @ ${price:.3f}")
                 trade_logger.info(f"   Size: ${self.position_size:.2f} | Expected return: {opportunity.get('return_pct', 0):.1f}%")

@@ -3,9 +3,7 @@
 import os
 import time
 import signal
-import sys
-from typing import Dict, List, Optional
-from datetime import datetime
+from typing import Dict, Optional
 
 from .exchanges.polymarket.adapter import PolymarketAdapter
 from .api.perpdex_client import PerpdexClient
@@ -502,7 +500,7 @@ class TradingBot:
                 iteration_start = time.time()
                 
                 # Run trading iteration
-                trades = self.run_iteration()
+                self.run_iteration()
                 
                 # Check if it's time for status update (every 30 minutes)
                 current_time = time.time()

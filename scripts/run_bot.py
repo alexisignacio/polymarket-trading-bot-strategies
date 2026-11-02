@@ -4,6 +4,9 @@
 import sys
 import time
 import signal
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.bot import TradingBot
 from src.utils.logger import setup_logger
 

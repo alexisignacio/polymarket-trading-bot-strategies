@@ -1,8 +1,8 @@
 """Profitability tracking and analytics"""
 
 from typing import Dict, List, Optional
-from datetime import datetime, timedelta
-from dataclasses import dataclass, field
+from datetime import datetime
+from dataclasses import dataclass
 from collections import defaultdict
 from ..utils.logger import setup_logger
 

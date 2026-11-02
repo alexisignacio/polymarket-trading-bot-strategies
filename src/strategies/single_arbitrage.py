@@ -3,7 +3,6 @@
 from datetime import datetime
 from typing import Dict, List, Optional
 from ..strategies.base_strategy import BaseStrategy
-from ..risk.position_tracker import Position
 from ..utils.logger import setup_logger, get_trade_logger, get_error_logger
 from ..utils.market_analyzer import MarketAnalyzer
 
@@ -215,8 +214,6 @@ class SingleArbitrageStrategy(BaseStrategy):
         Returns:
             Trade result dictionary
         """
-        market_id = opportunity['market_id']
-        
         return self._execute_binary_arbitrage(opportunity)
     
     def _execute_binary_arbitrage(self, opportunity: Dict) -> Optional[Dict]:

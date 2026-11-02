@@ -1,7 +1,6 @@
 """Order coordination and lifecycle management"""
 
 import threading
-import time
 from typing import Dict, List, Optional, Set
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -268,8 +267,6 @@ class OrderCoordinator:
         Returns:
             Reconciliation report
         """
-        exchange_order_ids = {order.get('order_id') for order in exchange_orders if order.get('order_id')}
-        
         report = {
             'matched': 0,
             'missing_on_exchange': [],

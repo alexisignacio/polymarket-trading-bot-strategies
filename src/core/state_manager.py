@@ -1,7 +1,6 @@
 """State persistence and recovery"""
 
 import json
-import os
 from pathlib import Path
 from typing import Dict, Optional, Any
 from datetime import datetime

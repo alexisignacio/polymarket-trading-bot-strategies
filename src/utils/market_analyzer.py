@@ -1,7 +1,6 @@
 """Market data analysis utilities"""
 
-from typing import Dict, List, Tuple, Optional
-from decimal import Decimal
+from typing import Dict, List, Optional
 
 
 class MarketAnalyzer:

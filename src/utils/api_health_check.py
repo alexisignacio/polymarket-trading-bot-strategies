@@ -1,7 +1,7 @@
 """API health check and connectivity verification"""
 
 import time
-from typing import Dict, List, Optional
+from typing import Dict
 from datetime import datetime
 from ..exchanges.polymarket.adapter import PolymarketAdapter
 from ..utils.logger import setup_logger

@@ -751,7 +751,7 @@ Potential improvements:
 
 PolyHFT is a sophisticated trading bot with:
 
-- **6 distinct strategies** (including 1 beta) for various market conditions
+- **4 distinct strategies** (including 1 beta) for various market conditions
 - **Comprehensive risk management** for capital protection
 - **High performance** through caching and parallelization
 - **Extensible architecture** for easy additions

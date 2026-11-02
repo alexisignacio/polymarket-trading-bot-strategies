@@ -15,7 +15,7 @@ First, let's install all the required Python packages:
 
 ```bash
 # Make sure you're in the PolyHFT directory
-cd /Users/anmoldureha/Code/PolyHFT
+cd polymarket-trading-bot-strategies
 
 # Install dependencies
 pip3 install -r requirements.txt
@@ -78,7 +78,7 @@ python3 main.py --paper --log-level DEBUG
 **What you'll see:**
 ```
 INFO - Starting trading bot...
-INFO - Initialized 4 strategies: ['micro_spreads', 'liquidity', 'single_arbitrage']
+INFO - Initialized 3 strategies: ['single_arbitrage', 'spread_scalping', 'tail_end']
 INFO - Strategy micro_spreads executed 2 trades
 ```
 
@@ -160,7 +160,7 @@ python3 main.py
 **"Config file not found"**
 ```bash
 # Solution: Make sure you're in the right directory
-cd /Users/anmoldureha/Code/PolyHFT
+cd polymarket-trading-bot-strategies
 ```
 
 **"Module not found"**

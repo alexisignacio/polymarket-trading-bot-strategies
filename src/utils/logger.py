@@ -2,7 +2,6 @@
 
 import logging
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -48,8 +47,8 @@ def setup_logger(
     if console:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(getattr(logging, log_level.upper()))
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
     
     # File handler if specified
     if log_file:

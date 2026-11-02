@@ -8,7 +8,7 @@ from ...api.gamma_client import GammaClient
 from ...api.rate_limiter import RateLimiter
 from ...utils.logger import setup_logger
 from ...utils.market_data_validator import MarketDataValidator
-from .normalizer import normalize_market, best_bid_ask
+from .normalizer import normalize_market
 
 
 logger = setup_logger(__name__)

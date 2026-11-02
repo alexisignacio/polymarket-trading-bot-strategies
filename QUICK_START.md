@@ -9,7 +9,7 @@ pip3 install -r requirements.txt
 
 ### Step 2: Run the Quick Test Script
 ```bash
-./quick_test.sh
+./scripts/quick_test.sh
 ```
 
 This script will:
@@ -71,7 +71,7 @@ tests/test_risk_manager.py::test_risk_manager_initialization PASSED
 ### When Bot Runs:
 ```
 INFO - Starting trading bot...
-INFO - Initialized 4 strategies: ['micro_spreads', 'liquidity', 'single_arbitrage']
+INFO - Initialized 3 strategies: ['single_arbitrage', 'spread_scalping', 'tail_end']
 INFO - Strategy micro_spreads executed 2 trades
 ```
 - Bot will scan for opportunities
@@ -99,7 +99,7 @@ pip3 install pytest
 **"Config file not found"**
 ```bash
 # Make sure you're in the PolyHFT directory
-cd /Users/anmoldureha/Code/PolyHFT
+cd polymarket-trading-bot-strategies
 ```
 
 **"Module not found"**

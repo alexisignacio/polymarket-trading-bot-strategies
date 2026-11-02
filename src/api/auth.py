@@ -66,7 +66,7 @@ class AuthManager:
                     wallet_address = perpdex_config.get('wallet_address')
                 if not private_key:
                     private_key = perpdex_config.get('private_key')
-            except Exception as e:
+            except Exception:
                 # Silently fail - config might not be available
                 pass
         

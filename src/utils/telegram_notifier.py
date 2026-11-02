@@ -1,13 +1,9 @@
 """Telegram notifications for trading bot"""
 
-import logging
 import threading
 import asyncio
-import concurrent.futures
 from typing import Optional
 from telegram import Bot
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram import Update
 from ..utils.logger import setup_logger
 
 
@@ -146,9 +142,9 @@ class TelegramNotifier:
     
     def bot_started(self, strategies: list) -> bool:
         """Notify that bot has started"""
-        message = f"🤖 <b>Bot Started</b>\n\n"
+        message = "🤖 <b>Bot Started</b>\n\n"
         message += f"✅ Strategies: {', '.join(strategies)}\n"
-        message += f"📊 Monitoring markets..."
+        message += "📊 Monitoring markets..."
         return self.send_message(message)
     
     def send_status_update(self, stats: dict) -> bool:
@@ -174,7 +170,7 @@ class TelegramNotifier:
         ws_status = stats.get('websocket_status', 'Unknown')
         iterations = stats.get('iteration_count', 0)
         
-        message = f"📊 <b>Bot Status Update</b>\n\n"
+        message = "📊 <b>Bot Status Update</b>\n\n"
         message += f"⏱️  Uptime: {uptime:.0f} minutes\n"
         message += f"🔄 Iterations: {iterations:,}\n"
         message += f"💼 Trades: {trades}\n"
@@ -191,7 +187,7 @@ class TelegramNotifier:
     
     def trade_executed(self, strategy: str, market_id: str, details: dict) -> bool:
         """Notify that a trade was executed"""
-        message = f"🎯 <b>Trade Executed</b>\n\n"
+        message = "🎯 <b>Trade Executed</b>\n\n"
         message += f"<b>Strategy:</b> {strategy}\n"
         message += f"<b>Market:</b> {market_id[:30]}...\n"
         
@@ -211,7 +207,7 @@ class TelegramNotifier:
     
     def trade_completed(self, strategy: str, market_id: str, profit: float) -> bool:
         """Notify that a trade was completed"""
-        message = f"✅ <b>Trade Completed</b>\n\n"
+        message = "✅ <b>Trade Completed</b>\n\n"
         message += f"<b>Strategy:</b> {strategy}\n"
         message += f"<b>Market:</b> {market_id[:30]}...\n"
         message += f"<b>Profit:</b> ${profit:.2f}"
@@ -219,7 +215,7 @@ class TelegramNotifier:
     
     def bot_stopped(self, total_trades: int, final_pnl: float) -> bool:
         """Notify that bot has stopped"""
-        message = f"🛑 <b>Bot Stopped</b>\n\n"
+        message = "🛑 <b>Bot Stopped</b>\n\n"
         message += f"<b>Total Trades:</b> {total_trades}\n"
         message += f"<b>Final P&L:</b> ${final_pnl:.2f}"
         return self.send_message(message)

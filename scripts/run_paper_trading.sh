@@ -3,7 +3,7 @@
 # Script to run the bot in paper trading mode
 # This activates the virtual environment and runs the bot
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 echo "=========================================="
 echo "PolyHFT Bot - Paper Trading Mode"

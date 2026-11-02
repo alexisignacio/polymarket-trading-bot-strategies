@@ -18,11 +18,20 @@ class TestNewStrategies(unittest.TestCase):
         self.config = {}
 
     def test_tail_end_strategy(self):
+        # Mocks must return list/dict shapes the strategy actually iterates
+        self.mock_risk_manager.position_tracker.get_positions_by_strategy.return_value = []
+        self.mock_risk_manager.position_tracker.get_positions_by_market.return_value = []
+        self.mock_risk_manager.check_trade_allowed.return_value = (True, None)
+        self.mock_client._order_coordinator = None
+        self.mock_market_cache.get_prices_parallel.side_effect = (
+            lambda pairs: {f"{m}_{o}": self.mock_market_cache.get_price(m, o) for m, o in pairs}
+        )
         strategy = TailEndStrategy(
             name="tail_end",
             polymarket_client=self.mock_client,
             risk_manager=self.mock_risk_manager,
-            config={'min_price': 0.90, 'max_price': 0.99, 'max_days_to_expiry': 7},
+            config={'min_price': 0.90, 'max_price': 0.99, 'max_days_to_expiry': 7,
+                    'min_return_pct': 2.0, 'max_spread_pct': 5.0},
             market_cache=self.mock_market_cache
         )
         
@@ -38,7 +47,9 @@ class TestNewStrategies(unittest.TestCase):
         
         # Mock Prices
         # m1: YES @ 0.95 (Match)
-        self.mock_market_cache.get_price.side_effect = lambda mid, outcome: {'ask': 0.95} if mid == 'm1' else {'ask': 0.50}
+        self.mock_market_cache.get_price.side_effect = lambda mid, outcome: (
+            {'bid': 0.94, 'ask': 0.95} if mid == 'm1' else {'bid': 0.49, 'ask': 0.50}
+        )
         
         opportunities = strategy.scan_opportunities()
         

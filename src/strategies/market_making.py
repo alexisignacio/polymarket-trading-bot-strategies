@@ -80,7 +80,7 @@ class MarketMakingStrategy(BaseStrategy):
         is_beta = self.config.get('beta', False)
         if is_beta:
             logger.warning(f"⚠️  [{self.name}] BETA STRATEGY - Under evaluation. Use with caution!")
-            trade_logger.warning(f"⚠️  Market Making Strategy is BETA - Monitor closely!")
+            trade_logger.warning("⚠️  Market Making Strategy is BETA - Monitor closely!")
         
         logger.info(f"[{self.name}] Initialized with {len(self.buy_bands)} buy bands and {len(self.sell_bands)} sell bands")
     
@@ -106,8 +106,8 @@ class MarketMakingStrategy(BaseStrategy):
         try:
             with open(path, 'r') as f:
                 return json.load(f)
-        except Exception as e:
-            error_logger.error(f"Error loading bands config: {e}")
+        except Exception:
+            error_logger.exception("Error loading bands config")
             raise
     
     def _parse_bands(self, bands_list: List[Dict]) -> List[Band]:

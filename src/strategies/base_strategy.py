@@ -1,7 +1,7 @@
 """Base strategy class"""
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 from ..exchanges.polymarket.adapter import PolymarketAdapter
 from ..api.perpdex_client import PerpdexClient
 from ..risk.risk_manager import RiskManager

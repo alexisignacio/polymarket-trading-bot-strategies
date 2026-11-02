@@ -118,7 +118,6 @@ def test_state_roundtrip_restores_historical_pnl(tmp_path):
     sm.save_state(rm.position_tracker, oc, pt)
 
     rm2 = RiskManager({'initial_capital': 1000.0})
-    oc2 = OrderCoordinator()
     pt2 = ProfitabilityTracker()
     pt2.set_initial_capital(1000.0)
     state = sm.load_state()

@@ -497,8 +497,6 @@ class PolymarketWebSocketClient:
             outcome: Outcome type (YES, NO, etc.)
             rest_client: REST client to fetch market data (optional, needed to get asset_id)
         """
-        key = (market_id, outcome)
-        
         with self.lock:
             if market_id not in self.subscriptions:
                 self.subscriptions[market_id] = set()

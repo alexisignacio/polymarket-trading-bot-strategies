@@ -28,7 +28,7 @@ API shapes:
     enable_order_book, neg_risk, minimum_tick_size, minimum_order_size
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 
 def normalize_market(raw: Dict) -> Dict:

@@ -70,7 +70,6 @@ def get_bot_pid() -> Optional[int]:
     Never scans for foreign processes: a pgrep on 'python.*main.py' would
     match unrelated projects and stop_bot would kill them.
     """
-    global bot_process
     if bot_process is not None and bot_process.poll() is None:
         return bot_process.pid
     try:
@@ -174,14 +173,8 @@ def get_metrics():
     total_exposure = 0.0
 
     for pos in open_positions:
-        entry = float(pos.get("entry_price", 0.0))
         size = float(pos.get("size", 0.0))  # USD notional at entry
-        side = pos.get("side", "buy")
         total_exposure += size
-        if entry > 0 and size > 0:
-            # mark-to-market needs a live price; approximate with entry
-            # (the positions endpoint returns the raw book values)
-            unrealized_pnl += 0.0
 
     current_portfolio = initial_cap + realized_pnl + unrealized_pnl
 

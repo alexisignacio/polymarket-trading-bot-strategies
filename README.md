@@ -33,16 +33,18 @@
 
 ## 🎯 Overview
 
-**PolyHFT** is a professional-grade high-frequency trading bot designed for Polymarket, the world's largest prediction market platform. The bot implements 10 distinct trading strategies (including 1 beta) that capitalize on market inefficiencies, arbitrage opportunities, and liquidity provision rewards.
+**PolyHFT** is a trading bot for Polymarket prediction markets. It runs 4 trading strategies against real market data with simulated (paper) fills — live order execution is NOT implemented.
 
 ### Key Highlights
 
-- 🚀 **10 Advanced Strategies** (1 beta): Hedging, micro-spreads, liquidity provision, single-market arbitrage, low-volume opportunities, spread scalping, tail-end trading, combinatorial arbitrage, legged arbitrage, and continuous market-making [BETA]
-- 🛡️ **Enterprise Risk Management**: Multi-layered risk controls with position limits, stop-losses, and drawdown protection
-- 📊 **Paper Trading Mode**: Test strategies safely with simulated trading before risking real capital
-- ⚡ **High Performance**: Parallel market fetching, intelligent caching, and optimized API usage
+- 🚀 **4 Strategies**: single-market arbitrage, spread scalping, tail-end trading, and continuous market-making [BETA]
+- 🛡️ **Risk Management**: position limits (per trade/market/strategy), exposure caps, stop-losses, drawdown protection — all applied against real filled positions
+- 📊 **Paper Trading Mode** (default, and the only supported mode): orders fill against live market prices via a fill simulator; P&L is honest but no real money moves
+- ⚡ **Batch market data**: orderbooks fetched in batches (POST /books), parallel price prefetch, 5s cache TTL
 - 📱 **Real-time Notifications**: Telegram integration for instant trade alerts
-- 🔄 **Cross-Exchange Hedging**: Integrates with Hyperliquid for advanced hedging strategies
+- 🌐 **Web Dashboard**: local dashboard for status, metrics, positions and strategy toggles
+
+> **Honest status**: this is a research/paper-trading system. The CLOB live-trading path (signed EIP-712 orders) is not implemented — `paper_trading: true` is effectively mandatory.
 
 ---
 
@@ -68,7 +70,7 @@
 ### Developer Experience
 
 - Clean, modular architecture
-- Extensive test coverage
+- Unit tests for risk management, fills and strategies
 - YAML-based configuration
 - Environment variable support
 - Comprehensive error handling
@@ -93,8 +95,7 @@
 
 - Targets markets with prices between $0.05-$0.10
 - Buys at bid, sells at ask for quick profits
-- Aims for 20-120% returns per cycle
-- Executes hundreds of trades per day
+
 - **Best for**: Active traders seeking high-frequency opportunities
 - **Example**: Market "Will Fed Cut Rates?" buys are at 8¢, sells at 14¢. Bot buys at 8¢. A few minutes later, price moves to 12¢. Bot sells for 50% profit instantly. Rinse and repeat 50x a day.
 
@@ -113,10 +114,10 @@
 
 - Finds markets where YES + NO < $1.00
 - Buys all outcomes simultaneously
-- Guaranteed profit upon market resolution
+- Profit at resolution if both legs are filled (depends on fills and unambiguous resolution)
 - Works with binary and multi-choice markets
-- **Best for**: Conservative traders seeking risk-free returns
-- **Example**: "Did it rain in London?" YES is trading at 40¢, NO is at 55¢. Total = 95¢. You buy 1000 shares of YES and 1000 shares of NO for $950 total. When market resolves, one side pays $1.00 (total $1000). Profit: $50 risk-free.
+- **Best for**: markets where YES+NO asks sum below $1
+- **Example**: "Did it rain in London?" YES is trading at 40¢, NO is at 55¢. Total = 95¢. You buy 1000 shares of YES and 1000 shares of NO for $950 total. When market resolves, one side pays $1.00 (total $1000). Profit: $50 if both legs fill and resolution is unambiguous.
 
 ### 5. Low-Volume High-Spread 🎯
 **Opportunities in newly launched markets**
@@ -124,7 +125,7 @@
 - Targets markets with <$10k volume and >10¢ spreads
 - Uses split order strategy: Buy YES+NO for $1, place strategic limit orders
 - Quick sell one side at 25¢, hold other at 95¢
-- Guaranteed profit: Sum of limit orders > 100¢
+- Locked profit if all legs fill: sum of limit orders > 100¢
 - **Best for**: Small traders (whales can't access these markets)
 - **Example**: New market launches with 0 volume. Spread is wide (Bid 10¢, Ask 90¢). You mint YES+NO pairs for $1.00. You list NO for sale at 95¢ (undercutting ask) and keep YES. If NO sells, you keep the YES share for effectively 5¢ cost.
 
@@ -172,7 +173,7 @@
 - **Phase 1 (Entry)**: Buy a low-priced outcome (e.g., NO @ 25¢) in a volatile market.
 - **Phase 2 (Wait)**: Hold and monitor the opposing outcome.
 - **Phase 3 (Hedge)**: Buy the opposing outcome when it becomes cheap (e.g., YES @ 45¢).
-- **Result**: Own YES+NO for 70¢. Guaranteed $1.00 payout = 30¢ risk-free profit.
+- **Result**: Own YES+NO for 70¢. $1.00 payout at resolution = 30¢ profit per pair, if both legs fill.
 - **Best for**: Volatile markets (e.g., crypto prices) where sentiment flips.
 - **Example**: BTC dumps. "BTC > 90k" NO outcome spikes to 80¢, YES drops to 20¢. You buy YES at 20¢ (Entry). 2 days later, BTC recovers. YES goes to 45¢, NO drops to 55¢. You now buy NO at 55¢ (Hedge). Total Cost: 20¢ + 55¢ = 75¢. Payout is always $1.00. Locked Profit: 25¢ per share.
 
@@ -217,7 +218,7 @@ The bot will start scanning for opportunities using real market data but won't p
    cp config/config.yaml.example config/config.yaml
    
    # Or create .env file (recommended for security)
-   cp .env.example .env
+   cp config/.env.example .env
    # Edit .env and add your credentials
    ```
 3. Add your credentials to `.env` file:
@@ -336,7 +337,7 @@ python main.py --config path/to/config.yaml
 python main.py --paper --log-level DEBUG
 
 # Watch trades in real-time
-./run_and_watch.sh
+./scripts/run_and_watch.sh
 ```
 
 ### Running Strategies
@@ -402,7 +403,7 @@ PolyHFT includes comprehensive risk management:
 PolyHFT/
 ├── src/
 │   ├── api/              # API clients (Polymarket, Hyperliquid)
-│   ├── strategies/       # Trading strategies (5 strategies)
+│   ├── strategies/       # Trading strategies (4 strategies)
 │   ├── risk/             # Risk management system
 │   ├── core/             # Core components (order coordinator, state manager)
 │   ├── exchanges/        # Exchange adapters (modular design)
@@ -508,9 +509,9 @@ black src/
 
 ## 📊 Performance
 
-- **Market Fetching**: Parallel fetching with 5-second cache (90% API call reduction)
+- **Market Fetching**: Batched orderbook requests with 5-second cache
 - **Price Updates**: Up to 10 concurrent price requests
-- **Strategy Execution**: Parallel strategy scanning
+- **Strategy Execution**: Sequential strategy loop per iteration
 - **Memory Usage**: Efficient caching with TTL-based invalidation
 
 ---

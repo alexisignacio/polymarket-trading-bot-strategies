@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run the bot and watch trades in real-time
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # Activate venv if it exists
 if [ -d "venv" ]; then
