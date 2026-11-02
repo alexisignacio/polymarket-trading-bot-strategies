@@ -81,6 +81,7 @@ class StateManager:
                 'side': position.side,
                 'size': position.size,
                 'entry_price': position.entry_price,
+                'outcome': getattr(position, 'outcome', 'YES'),
                 'current_price': position.current_price,
                 'timestamp': position.timestamp.isoformat(),
                 'status': position.status,
@@ -91,7 +92,8 @@ class StateManager:
         
         return {
             'open_positions': positions,
-            'closed_positions_count': len(tracker.closed_positions)
+            'closed_positions_count': len(tracker.closed_positions),
+            'closed_pnl': tracker.historical_pnl + sum(p.pnl for p in tracker.closed_positions)
         }
     
     def _serialize_orders(self, coordinator: OrderCoordinator) -> Dict:
@@ -186,6 +188,7 @@ class StateManager:
                         side=pos_data['side'],
                         size=pos_data['size'],
                         entry_price=pos_data['entry_price'],
+                        outcome=pos_data.get('outcome', 'YES'),
                         current_price=pos_data.get('current_price'),
                         timestamp=datetime.fromisoformat(pos_data['timestamp']),
                         status=pos_data['status'],
@@ -208,6 +211,31 @@ class StateManager:
         except Exception as e:
             logger.error(f"Error restoring positions: {e}")
             return 0
+    
+    def restore_profitability(
+        self,
+        state: Dict,
+        position_tracker: PositionTracker,
+        profitability_tracker: Any = None
+    ) -> None:
+        """Restore realized P&L so drawdown/capital survive restarts."""
+        try:
+            closed_pnl = float(state.get('positions', {}).get('closed_pnl', 0.0))
+            position_tracker.historical_pnl = closed_pnl
+            
+            prof = state.get('profitability', {}) or {}
+            if profitability_tracker is not None and prof:
+                profitability_tracker.initial_capital = float(
+                    prof.get('initial_capital', profitability_tracker.initial_capital)
+                )
+                profitability_tracker.current_capital = float(
+                    prof.get('current_capital', profitability_tracker.current_capital)
+                )
+            
+            if closed_pnl:
+                logger.info(f"Restored historical P&L: ${closed_pnl:.2f}")
+        except Exception as e:
+            logger.warning(f"Failed to restore profitability: {e}")
     
     def restore_orders(
         self,

@@ -18,6 +18,7 @@ class Position:
     side: str  # 'buy' or 'sell'
     size: float  # USD notional at entry (not share count)
     entry_price: float
+    outcome: str = 'YES'  # which outcome token this position tracks
     current_price: Optional[float] = None
     timestamp: datetime = field(default_factory=datetime.now)
     status: str = 'open'  # 'open', 'closed', 'partial'
@@ -33,6 +34,8 @@ class PositionTracker:
         """Initialize position tracker"""
         self.positions: Dict[str, Position] = {}
         self.closed_positions: List[Position] = []
+        # P&L realized before this session (restored from persisted state)
+        self.historical_pnl: float = 0.0
     
     def add_position(self, position: Position) -> None:
         """
@@ -140,12 +143,12 @@ class PositionTracker:
     
     def get_total_pnl(self) -> float:
         """
-        Calculate total P&L from closed positions.
+        Calculate total P&L from closed positions (incl. prior sessions).
         
         Returns:
             Total P&L
         """
-        return sum(p.pnl for p in self.closed_positions)
+        return self.historical_pnl + sum(p.pnl for p in self.closed_positions)
     
     def get_open_position_count(self) -> int:
         """Get count of open positions"""

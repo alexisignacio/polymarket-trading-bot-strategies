@@ -1,5 +1,6 @@
 """Order coordination and lifecycle management"""
 
+import threading
 import time
 from typing import Dict, List, Optional, Set
 from dataclasses import dataclass, field
@@ -40,12 +41,16 @@ class Order:
 class OrderCoordinator:
     """Manages order lifecycle and prevents duplicates"""
     
+    # Orders identical to one created within this window count as duplicates;
+    # after it, a repeat is a legitimate new attempt
+    DEDUP_WINDOW_SEC = 60.0
+    
     def __init__(self):
         """Initialize order coordinator"""
         self.orders: Dict[str, Order] = {}
         self.pending_orders: Set[str] = set()
         self.filled_orders: List[Order] = []
-        self.lock = None  # Will be set if threading is needed
+        self.lock = threading.Lock()
     
     def create_order(
         self,
@@ -74,23 +79,24 @@ class OrderCoordinator:
         Returns:
             Order object
         """
-        # Check for duplicate orders
-        if self._is_duplicate(market_id, outcome, side, price, size):
-            raise ValueError(f"Duplicate order detected: {market_id} {outcome} {side} @ {price}")
-        
-        order = Order(
-            order_id=order_id,
-            market_id=market_id,
-            outcome=outcome,
-            side=side,
-            size=size,
-            price=price,
-            strategy=strategy,
-            metadata=metadata or {}
-        )
-        
-        self.orders[order_id] = order
-        self.pending_orders.add(order_id)
+        with self.lock:
+            # Check for duplicate orders (recent ones only)
+            if self._is_duplicate(market_id, outcome, side, price, size):
+                raise ValueError(f"Duplicate order detected: {market_id} {outcome} {side} @ {price}")
+            
+            order = Order(
+                order_id=order_id,
+                market_id=market_id,
+                outcome=outcome,
+                side=side,
+                size=size,
+                price=price,
+                strategy=strategy,
+                metadata=metadata or {}
+            )
+            
+            self.orders[order_id] = order
+            self.pending_orders.add(order_id)
         
         logger.debug(f"Created order: {order_id} | {side} {size} @ {price} on {market_id}")
         
@@ -119,9 +125,16 @@ class OrderCoordinator:
         Returns:
             True if duplicate found
         """
+        now = datetime.now()
         for order_id in self.pending_orders:
             order = self.orders.get(order_id)
             if not order:
+                continue
+            
+            # A pending order from an hour ago must not block a legitimate
+            # re-quote forever; only recent matches are duplicates
+            age = (now - order.created_at).total_seconds()
+            if age > self.DEDUP_WINDOW_SEC:
                 continue
             
             if (order.market_id == market_id and
@@ -150,24 +163,25 @@ class OrderCoordinator:
         Returns:
             Updated order or None if not found
         """
-        order = self.orders.get(order_id)
-        if not order:
-            logger.warning(f"Order not found: {order_id}")
-            return None
-        
-        order.status = status
-        order.updated_at = datetime.now()
-        
-        if filled_size is not None:
-            order.filled_size = filled_size
-        
-        # Move to appropriate collection
-        if status == OrderStatus.FILLED:
-            self.pending_orders.discard(order_id)
-            if order not in self.filled_orders:
-                self.filled_orders.append(order)
-        elif status == OrderStatus.CANCELLED or status == OrderStatus.FAILED:
-            self.pending_orders.discard(order_id)
+        with self.lock:
+            order = self.orders.get(order_id)
+            if not order:
+                logger.warning(f"Order not found: {order_id}")
+                return None
+            
+            order.status = status
+            order.updated_at = datetime.now()
+            
+            if filled_size is not None:
+                order.filled_size = filled_size
+            
+            # Move to appropriate collection
+            if status == OrderStatus.FILLED:
+                self.pending_orders.discard(order_id)
+                if order not in self.filled_orders:
+                    self.filled_orders.append(order)
+            elif status == OrderStatus.CANCELLED or status == OrderStatus.FAILED:
+                self.pending_orders.discard(order_id)
         
         logger.debug(f"Updated order {order_id}: {status.value}")
         
@@ -213,8 +227,11 @@ class OrderCoordinator:
         Returns:
             List of pending orders
         """
+        with self.lock:
+            pending = list(self.pending_orders)
+        
         orders = []
-        for order_id in self.pending_orders:
+        for order_id in pending:
             order = self.orders.get(order_id)
             if not order:
                 continue

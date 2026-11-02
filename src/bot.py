@@ -12,6 +12,7 @@ from .api.perpdex_client import PerpdexClient
 from .api.auth import AuthManager
 from .risk.risk_manager import RiskManager
 from .core.order_coordinator import OrderCoordinator
+from .core.paper_fills import PaperFillSimulator
 from .core.state_manager import StateManager
 from .utils.api_health_check import APIHealthCheck
 from .strategies.base_strategy import BaseStrategy
@@ -118,6 +119,13 @@ class TradingBot:
         initial_capital = risk_config.get('initial_capital', 10000.0)
         self.profitability_tracker.set_initial_capital(initial_capital)
         
+        # Paper fill simulator (fills pending paper orders against real prices)
+        self.paper_fills = PaperFillSimulator(
+            self.order_coordinator,
+            self.risk_manager,
+            self.profitability_tracker
+        ) if paper_trading else None
+        
         # State management
         state_file = self.config.get('state_file', 'bot_state.json')
         self.state_manager = StateManager(state_file=state_file)
@@ -209,6 +217,9 @@ class TradingBot:
                 )
                 orders_restored = self.state_manager.restore_orders(
                     state, self.order_coordinator
+                )
+                self.state_manager.restore_profitability(
+                    state, self.risk_manager.position_tracker, self.profitability_tracker
                 )
                 
                 if positions_restored > 0 or orders_restored > 0:
@@ -316,6 +327,10 @@ class TradingBot:
             except Exception as e:
                 error_logger.error(f"Error running strategy {strategy_name}: {e}", exc_info=True)
         
+        # Fill pending paper orders against real market prices
+        if self.paper_fills:
+            self._process_paper_fills()
+        
         # Check stop losses
         self._check_stop_losses()
 
@@ -339,17 +354,38 @@ class TradingBot:
         self.iteration_count += 1
         return trades_executed
     
+    def _process_paper_fills(self) -> None:
+        """Fill pending paper orders against current real prices"""
+        if not self.paper_fills:
+            return
+        
+        def price_lookup(market_id: str, outcome: str):
+            return self.polymarket_client.get_best_price(market_id, outcome=outcome)
+        
+        try:
+            fills = self.paper_fills.process_fills(price_lookup)
+            if fills:
+                trade_logger.info(f"📝 {len(fills)} paper order(s) filled this iteration")
+        except Exception as e:
+            error_logger.error(f"Error processing paper fills: {e}", exc_info=True)
+    
     def _check_stop_losses(self) -> None:
         """Check all positions for stop loss triggers"""
         for position_id, position in list(self.risk_manager.position_tracker.positions.items()):
             try:
-                # Get current price
-                prices = self.polymarket_client.get_best_price(position.market_id, outcome="YES")
+                # Get current price for the position's actual outcome
+                outcome = getattr(position, 'outcome', 'YES')
+                prices = self.polymarket_client.get_best_price(position.market_id, outcome=outcome)
                 current_price = prices.get('bid') or prices.get('ask')
                 
                 if current_price and self.risk_manager.check_stop_loss(position_id, current_price):
-                    # Close position
-                    closed_position = self.risk_manager.close_position(position_id, current_price)
+                    # Close position for real (fills book + P&L + trade record)
+                    if self.paper_fills:
+                        closed_position = self.paper_fills.force_close(
+                            position_id, current_price, reason="stop-loss"
+                        )
+                    else:
+                        closed_position = self.risk_manager.close_position(position_id, current_price)
                     logger.warning(f"Stop loss triggered for position {position_id}")
                     
                     # Send Telegram notification
@@ -461,6 +497,13 @@ class TradingBot:
                 if time_since_last_status >= status_update_interval:
                     self._send_status_update(start_time)
                     last_status_update = current_time
+                
+                # Periodic state checkpoint (crash/corte de luz no pierde posiciones)
+                if self.iteration_count % 10 == 0:
+                    try:
+                        self._save_state()
+                    except Exception as e:
+                        logger.error(f"Periodic state save failed: {e}")
                 
                 # Periodically check for Telegram chat ID if not set
                 if self.telegram and not self.telegram.chat_id and self.iteration_count % 12 == 0: # Every ~1 minute (assuming 5s interval)
