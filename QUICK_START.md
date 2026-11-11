@@ -32,6 +32,18 @@ python3 main.py --paper
 
 Press `Ctrl+C` to stop the bot anytime.
 
+**Option C: Run bot + dashboard as a background service**
+```bash
+scripts/service.sh start     # bot (paper) + dashboard en http://127.0.0.1:8000
+scripts/service.sh status    # PIDs y salud del dashboard
+scripts/service.sh restart   # recargar con cambios de código
+scripts/service.sh stop      # parada limpia
+```
+
+Logs rotan automáticamente (5 MB × 3 backups) en `logs/`. El bot escribe
+`bot.pid` al arrancar y lo borra al parar; el dashboard lo usa para detectar
+el proceso aunque lo lances a mano.
+
 ---
 
 ## 📖 What Each Command Does

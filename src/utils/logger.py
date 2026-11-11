@@ -1,6 +1,7 @@
 """Logging configuration and utilities"""
 
 import logging
+import logging.handlers
 import sys
 from pathlib import Path
 from typing import Optional
@@ -10,6 +11,21 @@ from typing import Optional
 TRADE_LOG_FILE: Optional[str] = None
 ERROR_LOG_FILE: Optional[str] = None
 MAIN_LOG_FILE: Optional[str] = None
+
+# Rotation: 5 MB per file, 3 backups (~20 MB max per log stream)
+LOG_MAX_BYTES = 5 * 1024 * 1024
+LOG_BACKUP_COUNT = 3
+
+
+def _rotating_handler(log_file: str, level: int, formatter: logging.Formatter) -> logging.Handler:
+    log_path = Path(log_file)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT
+    )
+    handler.setLevel(level)
+    handler.setFormatter(formatter)
+    return handler
 
 
 def setup_logger(
@@ -52,12 +68,7 @@ def setup_logger(
     
     # File handler if specified
     if log_file:
-        log_path = Path(log_file)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        logger.addHandler(_rotating_handler(log_file, logging.DEBUG, formatter))
     
     return logger
 
@@ -99,9 +110,7 @@ def setup_multi_logger(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    main_file_handler = logging.FileHandler(main_log_file)
-    main_file_handler.setLevel(logging.DEBUG)
-    main_file_handler.setFormatter(main_formatter)
+    main_file_handler = _rotating_handler(main_log_file, logging.DEBUG, main_formatter)
     main_logger.addHandler(main_file_handler)
     
     # Setup trade logger (console + trade file)
@@ -118,13 +127,11 @@ def setup_multi_logger(
     trade_logger.addHandler(trade_console_handler)
     
     # Trade log file handler
-    trade_file_handler = logging.FileHandler(trade_log_file)
-    trade_file_handler.setLevel(logging.INFO)
     trade_file_formatter = logging.Formatter(
         '%(asctime)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    trade_file_handler.setFormatter(trade_file_formatter)
+    trade_file_handler = _rotating_handler(trade_log_file, logging.INFO, trade_file_formatter)
     trade_logger.addHandler(trade_file_handler)
     
     # Setup error logger (error file only, no console)
@@ -134,19 +141,15 @@ def setup_multi_logger(
     error_logger.propagate = False  # Don't propagate to parent
     
     # Error log file handler
-    error_file_handler = logging.FileHandler(error_log_file)
-    error_file_handler.setLevel(logging.WARNING)
     error_formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    error_file_handler.setFormatter(error_formatter)
+    error_file_handler = _rotating_handler(error_log_file, logging.WARNING, error_formatter)
     error_logger.addHandler(error_file_handler)
     
     # Also add error handler to main logger to catch all errors
-    error_handler = logging.FileHandler(error_log_file)
-    error_handler.setLevel(logging.WARNING)
-    error_handler.setFormatter(error_formatter)
+    error_handler = _rotating_handler(error_log_file, logging.WARNING, error_formatter)
     main_logger.addHandler(error_handler)
 
 

@@ -206,22 +206,20 @@ def get_positions():
 
 @app.get("/api/trades")
 def get_recent_trades():
-    """Recent trades from logs/trades.log or state"""
-    trades = []
-    if TRADE_LOG.exists():
-        try:
-            with open(TRADE_LOG, "r", encoding="utf-8") as f:
-                lines = f.readlines()[-50:]  # last 50 lines
-                for line in reversed(lines):
-                    line = line.strip()
-                    if line:
-                        trades.append({"raw": line})
-        except Exception:
-            pass
-
+    """Recent closed trades (structured, persisted across restarts)."""
+    state = load_state()
+    records = (state.get("profitability") or {}).get("trade_history") or []
+    trades = list(reversed(records[-100:]))  # most recent first
     return {
         "trades": trades
     }
+
+
+@app.get("/api/strategy-stats")
+def get_strategy_stats():
+    """Per-strategy cumulative stats (persisted across restarts)."""
+    state = load_state()
+    return (state.get("profitability") or {}).get("strategy_stats") or {}
 
 
 @app.get("/api/strategies")

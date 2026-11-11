@@ -247,11 +247,49 @@
       </div>
     </div>
 
+    <!-- Trade History Table -->
+    <div class="bg-[#111827]/80 border border-slate-800/80 rounded-2xl p-5 shadow-sm">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-sm font-bold text-white tracking-wide">Historial de Trades</h2>
+          <p class="text-xs text-slate-400">Operaciones cerradas (P&L neto de comisiones, persistido entre reinicios)</p>
+        </div>
+        <span id="tradesCountBadge" class="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          0 trades
+        </span>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs text-slate-300">
+          <thead class="bg-slate-800/50 uppercase text-[11px] text-slate-400 font-semibold tracking-wider">
+            <tr>
+              <th class="py-2.5 px-4 rounded-l-lg">Fecha Salida</th>
+              <th class="py-2.5 px-3">Mercado</th>
+              <th class="py-2.5 px-3">Estrategia</th>
+              <th class="py-2.5 px-3">Lado</th>
+              <th class="py-2.5 px-3">Entrada</th>
+              <th class="py-2.5 px-3">Salida</th>
+              <th class="py-2.5 px-3">Fees</th>
+              <th class="py-2.5 px-4 rounded-r-lg text-right">P&L</th>
+            </tr>
+          </thead>
+          <tbody id="tradesTableBody" class="divide-y divide-slate-800">
+            <tr>
+              <td colspan="8" class="py-6 text-center text-slate-500">
+                <i class="fa-solid fa-receipt text-lg mb-1 block"></i>
+                Aún no hay trades cerrados
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Strategy Control Section -->
     <div class="bg-[#111827]/80 border border-slate-800/80 rounded-2xl p-5 shadow-sm">
       <div class="flex items-center justify-between mb-4">
         <div>
-          <h2 class="text-sm font-bold text-white tracking-wide">Control de Estrategias (10 Disponibles)</h2>
+          <h2 class="text-sm font-bold text-white tracking-wide">Control de Estrategias</h2>
           <p class="text-xs text-slate-400">Activa o desactiva algoritmos en caliente con un clic</p>
         </div>
         <span class="text-xs text-slate-400"><i class="fa-solid fa-sliders mr-1"></i> Sincronizado con config.yaml</span>
@@ -506,6 +544,48 @@
       }
     }
 
+    // Fetch Trade History
+    async function fetchTrades() {
+      try {
+        const res = await fetch('/api/trades');
+        const data = await res.json();
+        const trades = data.trades || [];
+        const tbody = document.getElementById('tradesTableBody');
+        document.getElementById('tradesCountBadge').textContent = trades.length + ' trades';
+
+        if (trades.length === 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="8" class="py-6 text-center text-slate-500">
+                <i class="fa-solid fa-receipt text-lg mb-1 block"></i>
+                Aún no hay trades cerrados
+              </td>
+            </tr>`;
+          return;
+        }
+
+        tbody.innerHTML = trades.slice(0, 20).map(t => {
+          const pnl = t.pnl || 0;
+          const pnlClass = pnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
+          const exitTime = (t.exit_time || '').replace('T', ' ').slice(0, 16);
+          return `
+            <tr class="hover:bg-slate-800/30 transition">
+              <td class="py-2.5 px-4 font-mono text-slate-400">${escapeHtml(exitTime)}</td>
+              <td class="py-2.5 px-3 text-slate-200 max-w-xs truncate" title="${escapeHtml(t.market_id || '')}">${escapeHtml((t.market_id || '').slice(0, 24))}</td>
+              <td class="py-2.5 px-3 text-slate-400 capitalize">${escapeHtml((t.strategy || '').replace('_', ' '))}</td>
+              <td class="py-2.5 px-3 capitalize">${escapeHtml(t.side || '')}</td>
+              <td class="py-2.5 px-3 font-mono">$${(t.entry_price || 0).toFixed(3)}</td>
+              <td class="py-2.5 px-3 font-mono">$${(t.exit_price || 0).toFixed(3)}</td>
+              <td class="py-2.5 px-3 font-mono text-slate-500">$${(t.fees || 0).toFixed(3)}</td>
+              <td class="py-2.5 px-4 text-right font-mono font-bold ${pnlClass}">$${pnl.toFixed(2)}</td>
+            </tr>`;
+        }).join('');
+
+      } catch (err) {
+        console.error('Error fetching trades:', err);
+      }
+    }
+
     // Fetch Strategies
     async function fetchStrategies() {
       try {
@@ -613,6 +693,7 @@
       fetchStatus();
       fetchMetrics();
       fetchPositions();
+      fetchTrades();
       fetchStrategies();
       fetchLogs();
 
@@ -622,6 +703,9 @@
         fetchMetrics();
         fetchPositions();
       }, 2500);
+
+      // Trade history changes slowly
+      setInterval(fetchTrades, 10000);
 
       // Poll logs every 3 seconds
       setInterval(fetchLogs, 3000);

@@ -2,6 +2,8 @@
 
 from datetime import datetime
 
+import pytest
+
 from src.core.state_manager import StateManager
 from src.core.order_coordinator import OrderCoordinator
 from src.risk.position_tracker import PositionTracker
@@ -68,6 +70,61 @@ def test_state_round_trip_preserves_cumulative_stats(tmp_path):
     stats = pt2.get_overall_stats()
     assert stats['total_trades'] == 3
     assert stats['total_pnl'] == 1.5
+
+
+def test_strategy_stats_and_trade_history_survive_restart(tmp_path):
+    state_file = tmp_path / "state.json"
+    sm = StateManager(state_file=str(state_file))
+
+    pt1 = ProfitabilityTracker()
+    pt1.set_initial_capital(1000.0)
+    pt1.record_trade(make_trade(2.0))
+    pt1.record_trade(make_trade(-1.0))
+
+    assert sm.save_state(PositionTracker(), OrderCoordinator(), pt1)
+
+    pt2 = ProfitabilityTracker()
+    pt2.set_initial_capital(1000.0)
+    state = sm.load_state()
+    sm.restore_profitability(state, PositionTracker(), pt2)
+
+    # Per-strategy stats restored
+    stats = pt2.strategy_stats['test']
+    assert stats['total_trades'] == 2
+    assert stats['winning_trades'] == 1
+    assert stats['losing_trades'] == 1
+    assert stats['total_pnl'] == 1.0
+
+    # Trade records restored (reporting) and new trades append
+    records = pt2.get_trade_records()
+    assert len(records) == 2
+    assert {r.trade_id for r in records} == {'t_2.0', 't_-1.0'}
+
+    pt2.record_trade(make_trade(0.5))
+    records = pt2.get_trade_records()
+    assert len(records) == 3
+    # Cumulative counters must NOT double count the restored records
+    assert pt2.get_overall_stats()['total_trades'] == 3
+
+
+def test_trade_history_round_trip_preserves_fields(tmp_path):
+    state_file = tmp_path / "state.json"
+    sm = StateManager(state_file=str(state_file))
+
+    pt1 = ProfitabilityTracker()
+    pt1.set_initial_capital(1000.0)
+    pt1.record_trade(make_trade(1.234))
+    sm.save_state(PositionTracker(), OrderCoordinator(), pt1)
+
+    pt2 = ProfitabilityTracker()
+    pt2.set_initial_capital(1000.0)
+    sm.restore_profitability(sm.load_state(), PositionTracker(), pt2)
+
+    t = pt2.trade_history[0]
+    assert t.pnl == pytest.approx(1.234)
+    assert t.strategy == 'test'
+    assert t.side == 'buy'
+    assert t.fees == 0.0
 
 
 def test_cancelled_orders_are_pruned_from_state(tmp_path):

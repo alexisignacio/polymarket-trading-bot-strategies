@@ -40,7 +40,9 @@ class ProfitabilityTracker:
         self.historical_wins: int = 0
         self.historical_losses: int = 0
         self.historical_pnl: float = 0.0
-        
+        # Trade records from prior sessions (for reporting; counters above
+        # already include them)
+        self.trade_history: List[TradeRecord] = []
         # Strategy-specific metrics
         self.strategy_stats: Dict[str, Dict] = defaultdict(lambda: {
             'total_trades': 0,
@@ -54,6 +56,10 @@ class ProfitabilityTracker:
             'largest_win': 0.0,
             'largest_loss': 0.0
         })
+
+    def get_trade_records(self) -> List[TradeRecord]:
+        """All trade records: prior sessions first, then this session."""
+        return list(self.trade_history) + list(self.trades)
     
     def set_initial_capital(self, capital: float) -> None:
         """Set initial capital"""

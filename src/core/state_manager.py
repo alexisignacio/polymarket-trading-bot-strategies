@@ -12,6 +12,46 @@ from ..core.order_coordinator import OrderCoordinator, Order, OrderStatus
 logger = setup_logger(__name__)
 
 
+def _trade_to_dict(trade: Any) -> Dict:
+    """Serialize a TradeRecord to a JSON-safe dict."""
+    return {
+        'trade_id': trade.trade_id,
+        'strategy': trade.strategy,
+        'market_id': trade.market_id,
+        'entry_time': trade.entry_time.isoformat() if trade.entry_time else None,
+        'exit_time': trade.exit_time.isoformat() if trade.exit_time else None,
+        'entry_price': trade.entry_price,
+        'exit_price': trade.exit_price,
+        'size': trade.size,
+        'side': trade.side,
+        'pnl': trade.pnl,
+        'pnl_pct': trade.pnl_pct,
+        'fees': trade.fees,
+    }
+
+
+def _trade_from_dict(data: Dict) -> Optional[Any]:
+    """Parse a serialized trade back into a TradeRecord (None on garbage)."""
+    try:
+        from ..utils.profitability_tracker import TradeRecord
+        return TradeRecord(
+            trade_id=data['trade_id'],
+            strategy=data['strategy'],
+            market_id=data['market_id'],
+            entry_time=datetime.fromisoformat(data['entry_time']),
+            exit_time=datetime.fromisoformat(data['exit_time']),
+            entry_price=float(data['entry_price']),
+            exit_price=float(data['exit_price']),
+            size=float(data['size']),
+            side=data['side'],
+            pnl=float(data['pnl']),
+            pnl_pct=float(data.get('pnl_pct') or 0.0),
+            fees=float(data.get('fees') or 0.0),
+        )
+    except Exception:
+        return None
+
+
 class StateManager:
     """Manages bot state persistence and recovery"""
     
@@ -139,6 +179,7 @@ class StateManager:
         """Serialize profitability tracker to dict (cumulative across sessions)"""
         try:
             stats = tracker.get_overall_stats()
+            records = getattr(tracker, 'get_trade_records', lambda: [])()
             return {
                 'initial_capital': tracker.initial_capital,
                 'current_capital': tracker.current_capital,
@@ -147,7 +188,12 @@ class StateManager:
                 'losing_trades': stats.get('losing_trades', 0),
                 'total_pnl': stats.get('total_pnl', 0.0),
                 'win_rate': stats.get('win_rate', 0.0),
-                'roi': stats.get('roi', 0.0)
+                'roi': stats.get('roi', 0.0),
+                'strategy_stats': {
+                    name: dict(values)
+                    for name, values in getattr(tracker, 'strategy_stats', {}).items()
+                },
+                'trade_history': [_trade_to_dict(t) for t in records[-500:]]
             }
         except Exception as e:
             logger.debug(f"Error serializing profitability: {e}")
@@ -254,6 +300,16 @@ class StateManager:
                 profitability_tracker.historical_wins = int(prof.get('winning_trades', 0))
                 profitability_tracker.historical_losses = int(prof.get('losing_trades', 0))
                 profitability_tracker.historical_pnl = float(prof.get('total_pnl', 0.0))
+
+                # Per-strategy stats and trade records (reporting only; the
+                # cumulative counters above already include them)
+                for name, values in (prof.get('strategy_stats') or {}).items():
+                    if isinstance(values, dict):
+                        profitability_tracker.strategy_stats[name].update(values)
+                profitability_tracker.trade_history = [
+                    t for t in (_trade_from_dict(h) for h in (prof.get('trade_history') or []))
+                    if t is not None
+                ][-500:]
             
             if closed_pnl:
                 logger.info(f"Restored historical P&L: ${closed_pnl:.2f}")
