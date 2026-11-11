@@ -1,7 +1,6 @@
 """Risk management engine"""
 
 from typing import Dict, Optional, Tuple
-from decimal import Decimal
 from ..utils.logger import setup_logger
 from ..risk.position_tracker import PositionTracker, Position
 

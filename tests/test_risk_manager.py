@@ -1,6 +1,5 @@
 """Tests for risk management system"""
 
-import pytest
 from src.risk.risk_manager import RiskManager
 from src.risk.position_tracker import Position
 

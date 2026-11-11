@@ -6,7 +6,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Status](https://img.shields.io/badge/status-active-success.svg)
 
-**An advanced algorithmic trading bot for Polymarket prediction markets with 10 sophisticated trading strategies**
+**An algorithmic trading bot for Polymarket prediction markets with 4 implemented trading strategies (paper trading)**
 
 [Features](#-features) • [Quick Start](#-quick-start) • [Strategies](#-strategies) • [Documentation](#-documentation) • [Contributing](#-contributing)
 
@@ -80,36 +80,12 @@
 
 ## 📈 Trading Strategies
 
-### 1. Hedging Strategy 🔄
-**Cross-exchange hedging with Polymarket and Hyperliquid**
+> **Honest status**: only the 4 strategies below are implemented and run against
+> real market data with simulated (paper) fills. Everything in the
+> [concept catalog](#concept-catalog-not-implemented) at the end of this section
+> is a design idea that was pruned in Phase 0 and is **not implemented**.
 
-- Monitors BTC-related markets on Polymarket
-- Opens short positions when YES < $0.50
-- Hedges with long positions on Hyperliquid perpetuals
-- Targets 100-150% profit before closing
-- **Best for**: Traders comfortable with cross-exchange positions
-- **Example**: Polymarket "Will Bitcoin hit $100k?" NO is trading at 25¢. You short it (buy NO) effectively betting Bitcoin won't hit $100k. Simultaneously, you long Bitcoin on Hyperliquid. If Bitcoin pumps, your Hyperliquid long profit covers your Polymarket loss. If Bitcoin dumps, you win the Polymarket bet and lose the hedge, capturing the premium.
-
-### 2. Micro-Spread Farming 💰
-**High-frequency spread capture in low-priced markets**
-
-- Targets markets with prices between $0.05-$0.10
-- Buys at bid, sells at ask for quick profits
-
-- **Best for**: Active traders seeking high-frequency opportunities
-- **Example**: Market "Will Fed Cut Rates?" buys are at 8¢, sells at 14¢. Bot buys at 8¢. A few minutes later, price moves to 12¢. Bot sells for 50% profit instantly. Rinse and repeat 50x a day.
-
-### 3. Liquidity Provision 🌊
-**Market making with liquidity rewards**
-
-- Identifies markets with wide bid/ask spreads (>2%)
-- Places orders to tighten spreads by 50%
-- Earns liquidity provision rewards (up to $50 per market)
-- Enhanced market making with price chasing
-- **Best for**: Patient traders seeking steady income
-- **Example**: Market "Ethereum > $5000". Spread is 20¢ (Bid 40¢, Ask 60¢). Bot places limit Buy at 41¢ and Sell at 59¢. It earns the spread difference + daily rewards from Polymarket for providing liquidity.
-
-### 4. Single-Market Arbitrage ⚖️
+### 1. Single-Market Arbitrage ⚖️
 **Risk-free arbitrage within single markets**
 
 - Finds markets where YES + NO < $1.00
@@ -119,17 +95,7 @@
 - **Best for**: markets where YES+NO asks sum below $1
 - **Example**: "Did it rain in London?" YES is trading at 40¢, NO is at 55¢. Total = 95¢. You buy 1000 shares of YES and 1000 shares of NO for $950 total. When market resolves, one side pays $1.00 (total $1000). Profit: $50 if both legs fill and resolution is unambiguous.
 
-### 5. Low-Volume High-Spread 🎯
-**Opportunities in newly launched markets**
-
-- Targets markets with <$10k volume and >10¢ spreads
-- Uses split order strategy: Buy YES+NO for $1, place strategic limit orders
-- Quick sell one side at 25¢, hold other at 95¢
-- Locked profit if all legs fill: sum of limit orders > 100¢
-- **Best for**: Small traders (whales can't access these markets)
-- **Example**: New market launches with 0 volume. Spread is wide (Bid 10¢, Ask 90¢). You mint YES+NO pairs for $1.00. You list NO for sale at 95¢ (undercutting ask) and keep YES. If NO sells, you keep the YES share for effectively 5¢ cost.
-
-### 6. Spread Scalping ⚡
+### 2. Spread Scalping ⚡
 **High-frequency spread capture**
 
 - Scans for liquid markets with wide spreads (3-5 cents)
@@ -138,7 +104,7 @@
 - **Best for**: Active markets with decent volume
 - **Example**: "Will Trump Win?" trading at 54¢. Bot sees order book imbalance and buy pressure. Buys at 54.2¢. Price ticks up to 55.5¢. Bot sells immediately. Profit: 1.3¢ per share (2.4% ROI in seconds).
 
-### 7. Tail-End Trading 🏁
+### 3. Tail-End Trading 🏁
 **High-probability outcomes near resolution**
 
 - Buys outcomes priced >$0.93 near expiry (<7 days)
@@ -147,16 +113,7 @@
 - **Best for**: Consistent, low-risk yield farming
 - **Example**: "Will Taylor Swift announce album by Friday?" Thursday night, no news. YES is trading at 2¢, NO is at 96¢. Bot buys NO at 96¢. Friday passes, no album. Market resolves NO. Profit: 4¢ per share (4.1% ROI overnight).
 
-### 8. Combinatorial Arbitrage 🔗
-**Exploiting correlated market discrepancies**
-
-- Detects logical contradictions between linked markets
-- Monitors keyword-grouped markets (e.g., "Bitcoin") for price divergence
-- Signals opportunities when related markets trade at vastly different probabilities
-- **Best for**: Sophisticated arbitrage across the platform
-- **Example**: Market A: "Bitcoin > $90k in 2024" trades at 60%. Market B: "Bitcoin > $100k in 2024" trades at 65%. Logical contradiction! Bitcoin cannot be >100k but not >90k. Bot alerts you to short Market B and long Market A.
-
-### 9. Continuous Market Making 📊 [BETA]
+### 4. Continuous Market Making 📊 [BETA]
 **Band-based order management around market price**
 
 ⚠️ **BETA STATUS**: This strategy is under evaluation. Use with caution and monitor closely.
@@ -167,15 +124,18 @@
 - Automatic order placement to maintain target amounts
 - **Best for**: Advanced traders comfortable with continuous order management
 - **Example**: "US GDP Growth > 2%". Price is 60¢. Bot maintains Buy orders at 58¢, 57¢, 56¢ and Sell orders at 62¢, 63¢, 64¢. As price fluctuates, it fills buys and sells, capturing small profits continuously.
-### 10. Legged Arbitrage 🦵
-**Directional Scalping / Time-Separated Arbitrage**
+### Concept catalog (NOT implemented)
 
-- **Phase 1 (Entry)**: Buy a low-priced outcome (e.g., NO @ 25¢) in a volatile market.
-- **Phase 2 (Wait)**: Hold and monitor the opposing outcome.
-- **Phase 3 (Hedge)**: Buy the opposing outcome when it becomes cheap (e.g., YES @ 45¢).
-- **Result**: Own YES+NO for 70¢. $1.00 payout at resolution = 30¢ profit per pair, if both legs fill.
-- **Best for**: Volatile markets (e.g., crypto prices) where sentiment flips.
-- **Example**: BTC dumps. "BTC > 90k" NO outcome spikes to 80¢, YES drops to 20¢. You buy YES at 20¢ (Entry). 2 days later, BTC recovers. YES goes to 45¢, NO drops to 55¢. You now buy NO at 55¢ (Hedge). Total Cost: 20¢ + 55¢ = 75¢. Payout is always $1.00. Locked Profit: 25¢ per share.
+These strategies were explored in early iterations and **pruned in Phase 0**
+(no viable execution path in this codebase). They are kept here as design
+ideas only — there is no code for them:
+
+- **Hedging (cross-exchange)** — hedge Polymarket legs on Hyperliquid perpetuals. Hyperliquid client exists for reference but no hedging strategy runs.
+- **Micro-Spread Farming** — HFT bid/ask capture in 5-10¢ markets.
+- **Liquidity Provision** — spread tightening + Polymarket liquidity rewards.
+- **Low-Volume High-Spread** — mint YES+NO pairs in new markets, work the legs.
+- **Combinatorial Arbitrage** — logical contradictions across correlated markets.
+- **Legged Arbitrage** — time-separated entry/hedge legs summing below $1.
 
 
 ---

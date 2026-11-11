@@ -10,7 +10,7 @@ map and callers treat metadata as unknown instead of crashing.
 
 import threading
 import time
-from typing import Dict, Optional
+from typing import Dict
 
 import requests
 

@@ -1,6 +1,6 @@
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from datetime import datetime, timedelta
 import sys
 import os

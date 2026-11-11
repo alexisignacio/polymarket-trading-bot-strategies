@@ -82,7 +82,7 @@ class PolymarketRESTClient:
                 self.rate_limiter.handle_rate_limit_error(endpoint)
                 self.rate_limiter.wait_if_needed(endpoint)
                 kwargs.setdefault('timeout', 15)
-            response = self.session.request(method, url, **kwargs)
+                response = self.session.request(method, url, **kwargs)
             
             response.raise_for_status()
             self.rate_limiter.record_call(endpoint)
@@ -92,7 +92,11 @@ class PolymarketRESTClient:
             if e.response.status_code == 429:
                 self.rate_limiter.handle_rate_limit_error(endpoint)
                 logger.warning(f"Rate limit error for {endpoint}, will retry after backoff")
-            logger.error(f"API request failed: {method} {endpoint} - {e}")
+            if e.response.status_code == 404:
+                # Missing resources (e.g. books for resolved tokens) are expected
+                logger.debug(f"Not found: {method} {endpoint}")
+            else:
+                logger.error(f"API request failed: {method} {endpoint} - {e}")
             raise
         except requests.exceptions.RequestException as e:
             logger.error(f"API request failed: {method} {endpoint} - {e}")
@@ -268,6 +272,12 @@ class PolymarketRESTClient:
                 return {'bids': [], 'asks': []}
             
             return orderbook or {'bids': [], 'asks': []}
+        except requests.exceptions.HTTPError as e:
+            if getattr(e.response, 'status_code', None) == 404:
+                logger.debug(f"No orderbook for token {str(resolved)[:24]}...")
+            else:
+                logger.error(f"Error getting orderbook: {e}", exc_info=True)
+            return {'bids': [], 'asks': []}
         except Exception as e:
             logger.error(f"Error getting orderbook: {e}", exc_info=True)
             return {'bids': [], 'asks': []}

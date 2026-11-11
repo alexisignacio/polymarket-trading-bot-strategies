@@ -1,7 +1,6 @@
 """API credential management and authentication"""
 
 import os
-from typing import Optional
 from dotenv import load_dotenv
 from pathlib import Path
 
