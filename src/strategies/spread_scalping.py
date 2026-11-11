@@ -40,6 +40,7 @@ class SpreadScalpingStrategy(BaseStrategy):
         self.likely_outcome_threshold = self.config.get('likely_outcome_threshold', 0.60)  # lowered probability threshold for testing
         self.order_size_usdc = self.config.get('order_size_usdc', 10.0)
         self.max_positions = self.config.get('max_positions', 5)
+        self.order_ttl_seconds = self.config.get('order_ttl_seconds', 120.0)
         
         # Rotating scan configuration
         self.markets_per_scan = self.config.get('markets_per_scan', 1000)  # Markets to check per iteration
@@ -259,6 +260,19 @@ class SpreadScalpingStrategy(BaseStrategy):
         try:
             coordinator = getattr(self.polymarket_client, '_order_coordinator', None)
             
+            # Cancel stale resting orders: without an expiry, unfilled orders
+            # pin active_markets at max_positions forever and block the scan
+            if coordinator:
+                now = datetime.now()
+                for order in list(coordinator.get_pending_orders(strategy=self.name)):
+                    age = (now - order.created_at).total_seconds()
+                    if age > self.order_ttl_seconds:
+                        coordinator.cancel_order(order.order_id)
+                        logger.info(
+                            f"[{self.name}] Cancelled stale order {order.order_id} "
+                            f"(age {age:.0f}s > {self.order_ttl_seconds:.0f}s)"
+                        )
+            
             # Rebuild from real state: a market is 'active' while we have a
             # pending order or an open position there (never grows forever)
             pending_markets = set()
@@ -307,6 +321,7 @@ class SpreadScalpingStrategy(BaseStrategy):
         market_id = opportunity['market_id']
         outcome = opportunity['outcome']
         type = opportunity['type']
+        order_coordinator = getattr(self.polymarket_client, '_order_coordinator', None)
         
         try:
             if type == 'entry':
@@ -332,6 +347,7 @@ class SpreadScalpingStrategy(BaseStrategy):
                         side='buy',
                         price=price,
                         size=size,
+                        order_coordinator=order_coordinator,
                         strategy=self.name
                     )
                     if res:
@@ -353,6 +369,7 @@ class SpreadScalpingStrategy(BaseStrategy):
                     side='sell',
                     price=price,
                     size=size,
+                    order_coordinator=order_coordinator,
                     strategy=self.name
                 )
                 return res

@@ -3,6 +3,7 @@
 import os
 import time
 import signal
+from pathlib import Path
 from typing import Dict, Optional
 
 from .exchanges.polymarket.adapter import PolymarketAdapter
@@ -12,6 +13,7 @@ from .risk.risk_manager import RiskManager
 from .core.order_coordinator import OrderCoordinator
 from .core.paper_fills import PaperFillSimulator
 from .core.state_manager import StateManager
+from .core.state_reconciler import reconcile_restored_state
 from .utils.api_health_check import APIHealthCheck
 from .strategies.base_strategy import BaseStrategy
 from .strategies.single_arbitrage import SingleArbitrageStrategy
@@ -28,6 +30,10 @@ from .utils.telegram_notifier import TelegramNotifier
 logger = setup_logger(__name__)
 trade_logger = get_trade_logger()
 error_logger = get_error_logger()
+
+# Written at run() so the dashboard (dashboard/server.py) detects the bot no
+# matter how it was launched (manual CLI, script or dashboard start button)
+PID_FILE = Path(__file__).resolve().parent.parent / "bot.pid"
 
 
 class TradingBot:
@@ -226,8 +232,53 @@ class TradingBot:
                         f"State restored: {positions_restored} positions, "
                         f"{orders_restored} orders"
                     )
+                self._reconcile_restored_state()
         except Exception as e:
             logger.warning(f"Failed to restore state: {e}")
+    
+    def _lookup_market_raw(self, market_id: str):
+        """Raw market dict for reconciliation, None when confirmed missing.
+
+        Transient API errors propagate so the reconciler keeps the position.
+        """
+        import requests
+        try:
+            return self.polymarket_client.get_market(market_id)
+        except requests.exceptions.HTTPError as e:
+            if getattr(e.response, 'status_code', None) == 404:
+                return None
+            raise
+    
+    def _reconcile_close(self, position_id: str, exit_price: float, reason: str) -> None:
+        """Close a restored position during reconciliation (paper-aware)."""
+        if self.paper_fills:
+            self.paper_fills.force_close(position_id, exit_price, reason)
+        else:
+            closed = self.risk_manager.close_position(position_id, exit_price)
+            if closed:
+                trade_logger.info(
+                    f"📝 [CLOSE] {position_id} @ {exit_price:.4f} "
+                    f"P&L ${closed.pnl:.2f} ({reason})"
+                )
+    
+    def _reconcile_restored_state(self) -> None:
+        """Settle restored positions/orders whose markets resolved or vanished."""
+        try:
+            summary = reconcile_restored_state(
+                position_tracker=self.risk_manager.position_tracker,
+                order_coordinator=self.order_coordinator,
+                market_lookup=self._lookup_market_raw,
+                close_fn=self._reconcile_close,
+                cancel_fn=self.order_coordinator.cancel_order,
+            )
+            if any(summary.values()):
+                logger.info(
+                    f"State reconciled: settled_won={summary['settled_won']} "
+                    f"settled_lost={summary['settled_lost']} dropped={summary['dropped']} "
+                    f"cancelled_orders={summary['cancelled']} kept={summary['kept']}"
+                )
+        except Exception as e:
+            logger.warning(f"State reconciliation failed: {e}")
     
     def _run_startup_health_check(self) -> None:
         """Run API health check on startup"""
@@ -269,11 +320,11 @@ class TradingBot:
         Run one iteration of the trading loop.
         
         Returns:
-            Number of trades executed
+            Number of paper orders filled this iteration
         """
         import time
         iteration_start = time.time()
-        trades_executed = 0
+        orders_placed = 0
         
         logger.debug(f"=== Iteration {self.iteration_count + 1} ===")
         
@@ -287,22 +338,21 @@ class TradingBot:
                 strategy_start = time.time()
                 logger.debug(f"Running strategy: {strategy_name}")
                 
-                trades = strategy.run()
-                trades_executed += len(trades)
-                self.total_trades += len(trades)
+                placed = strategy.run()
+                orders_placed += len(placed)
                 
                 strategy_time = time.time() - strategy_start
                 
-                if trades:
+                if placed:
                     trade_logger.info("")
                     trade_logger.info("🔥" * 40)
-                    trade_logger.info(f"✅ Strategy {strategy_name} EXECUTED {len(trades)} TRADE(S) in {strategy_time:.2f}s")
+                    trade_logger.info(f"✅ Strategy {strategy_name} PLACED {len(placed)} ORDER(S) in {strategy_time:.2f}s")
                     trade_logger.info("🔥" * 40)
                     trade_logger.info("")
                     
-                    # Send Telegram notification for each trade
+                    # Send Telegram notification for each placed order
                     if self.telegram:
-                        for trade in trades:
+                        for trade in placed:
                             market_id = trade.get('market_id', 'unknown')
                             details = {}
                             
@@ -321,14 +371,14 @@ class TradingBot:
                             
                             self.telegram.trade_executed(strategy_name, market_id, details)
                 else:
-                    logger.debug(f"Strategy {strategy_name} found no trades to execute (took {strategy_time:.2f}s)")
+                    logger.debug(f"Strategy {strategy_name} placed no orders (took {strategy_time:.2f}s)")
             
             except Exception as e:
                 error_logger.error(f"Error running strategy {strategy_name}: {e}", exc_info=True)
         
         # Fill pending paper orders against real market prices
-        if self.paper_fills:
-            self._process_paper_fills()
+        fills_executed = self._process_paper_fills() if self.paper_fills else []
+        self.total_trades += len(fills_executed)
         
         # Check stop losses
         self._check_stop_losses()
@@ -345,18 +395,25 @@ class TradingBot:
             self._log_risk_metrics()
         
         iteration_time = time.time() - iteration_start
-        if trades_executed > 0:
-            trade_logger.info(f"📊 Iteration {self.iteration_count + 1}: {trades_executed} trades executed in {iteration_time:.2f}s")
+        if orders_placed > 0 or fills_executed:
+            trade_logger.info(
+                f"📊 Iteration {self.iteration_count + 1}: "
+                f"{len(fills_executed)} fill(s), {orders_placed} order(s) placed "
+                f"in {iteration_time:.2f}s"
+            )
         
-        logger.debug(f"Iteration {self.iteration_count + 1} completed: {trades_executed} trades executed in {iteration_time:.2f}s")
+        logger.debug(
+            f"Iteration {self.iteration_count + 1} completed: "
+            f"{len(fills_executed)} fills, {orders_placed} orders placed"
+        )
         
         self.iteration_count += 1
-        return trades_executed
+        return len(fills_executed)
     
-    def _process_paper_fills(self) -> None:
+    def _process_paper_fills(self) -> list:
         """Fill pending paper orders against current real prices"""
         if not self.paper_fills:
-            return
+            return []
         
         def price_lookup(market_id: str, outcome: str):
             return self.polymarket_client.get_best_price(market_id, outcome=outcome)
@@ -365,8 +422,10 @@ class TradingBot:
             fills = self.paper_fills.process_fills(price_lookup)
             if fills:
                 trade_logger.info(f"📝 {len(fills)} paper order(s) filled this iteration")
+            return fills
         except Exception as e:
             error_logger.error(f"Error processing paper fills: {e}", exc_info=True)
+            return []
     
     def _check_stop_losses(self) -> None:
         """Check all positions for stop loss triggers"""
@@ -474,6 +533,7 @@ class TradingBot:
         trade_logger.info("🤖 Bot is running...")
         
         self.running = True
+        self._write_pid_file()
         
         # Send Telegram notification (after running is set and chat_id is detected)
         if self.telegram:
@@ -557,7 +617,7 @@ class TradingBot:
         
         logger.info(
             f"Bot stopped | Total iterations: {self.iteration_count} | "
-            f"Total trades: {self.total_trades} | "
+            f"Total fills: {self.total_trades} | "
             f"Final P&L: ${metrics['total_pnl']:.2f}"
         )
         
@@ -571,6 +631,22 @@ class TradingBot:
         
         # Save final state
         self._save_state()
+        self._remove_pid_file()
+    
+    def _write_pid_file(self) -> None:
+        """Publish our PID so the dashboard can detect externally started bots."""
+        try:
+            PID_FILE.write_text(str(os.getpid()))
+        except OSError as e:
+            logger.warning(f"Could not write PID file {PID_FILE}: {e}")
+    
+    def _remove_pid_file(self) -> None:
+        """Remove our PID file unless another process owns it now."""
+        try:
+            if PID_FILE.exists() and PID_FILE.read_text().strip() == str(os.getpid()):
+                PID_FILE.unlink()
+        except OSError as e:
+            logger.warning(f"Could not remove PID file {PID_FILE}: {e}")
     
     def get_status(self) -> Dict:
         """

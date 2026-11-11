@@ -11,8 +11,7 @@ from typing import Dict, Any, Optional
 
 import yaml
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = BASE_DIR / "config" / "config.yaml"
@@ -136,6 +135,9 @@ def get_status():
     cfg = load_config()
 
     uptime_sec = int(time.time() - bot_start_time) if (running and bot_start_time) else 0
+    if running and not uptime_sec and PID_FILE.exists():
+        # Externally started bot: the PID file is written at bot startup
+        uptime_sec = int(time.time() - PID_FILE.stat().st_mtime)
 
     return {
         "status": "online" if running else "offline",

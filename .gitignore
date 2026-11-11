@@ -58,6 +58,7 @@ Thumbs.db
 # Sensitive configuration files
 config/config.yaml
 bot_state.json
+bot.pid
 .env
 .env.local
 .env.*.local

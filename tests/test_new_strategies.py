@@ -58,5 +58,36 @@ class TestNewStrategies(unittest.TestCase):
         self.assertEqual(opportunities[0]['price'], 0.95)
         print("✅ Tail End Strategy verified")
 
+    def test_spread_scalping_cancels_stale_orders(self):
+        """Unfilled resting orders must expire, or they block the scan forever"""
+        from src.core.order_coordinator import OrderCoordinator, OrderStatus
+        from src.strategies.spread_scalping import SpreadScalpingStrategy
+
+        coordinator = OrderCoordinator()
+        self.mock_client._order_coordinator = coordinator
+        self.mock_risk_manager.position_tracker.get_positions_by_strategy.return_value = []
+
+        strategy = SpreadScalpingStrategy(
+            name="spread_scalping",
+            polymarket_client=self.mock_client,
+            risk_manager=self.mock_risk_manager,
+            config={'order_ttl_seconds': 120.0},
+            market_cache=self.mock_market_cache,
+        )
+
+        stale = coordinator.create_order('o_old', 'm1', 'NO', 'buy', 10.0, 0.9,
+                                         strategy='spread_scalping')
+        stale.created_at = datetime.now() - timedelta(seconds=300)
+        fresh = coordinator.create_order('o_new', 'm2', 'NO', 'buy', 10.0, 0.8,
+                                         strategy='spread_scalping')
+
+        strategy._manage_existing_positions([])
+
+        self.assertEqual(coordinator.get_order('o_old').status, OrderStatus.CANCELLED)
+        self.assertEqual(coordinator.get_order('o_new').status, OrderStatus.PENDING)
+        self.assertIs(fresh, coordinator.get_order('o_new'))
+        self.assertEqual(strategy.active_markets, {'m2'})
+        print("✅ Spread Scalping stale-order expiry verified")
+
 if __name__ == '__main__':
     unittest.main()

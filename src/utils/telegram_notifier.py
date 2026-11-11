@@ -154,7 +154,7 @@ class TelegramNotifier:
         Args:
             stats: Dictionary with bot statistics:
                 - uptime_minutes: Bot uptime in minutes
-                - total_trades: Total trades executed
+                - total_trades: Total fills executed
                 - total_pnl: Total profit/loss
                 - active_strategies: List of active strategies
                 - websocket_status: WebSocket connection status
@@ -173,7 +173,7 @@ class TelegramNotifier:
         message = "📊 <b>Bot Status Update</b>\n\n"
         message += f"⏱️  Uptime: {uptime:.0f} minutes\n"
         message += f"🔄 Iterations: {iterations:,}\n"
-        message += f"💼 Trades: {trades}\n"
+        message += f"💼 Fills: {trades}\n"
         message += f"💰 P&L: ${pnl:.2f}\n"
         message += f"📡 WebSocket: {ws_status}\n"
         message += f"✅ Strategies: {len(strategies)} active\n"
@@ -186,8 +186,8 @@ class TelegramNotifier:
         return self.send_message(message)
     
     def trade_executed(self, strategy: str, market_id: str, details: dict) -> bool:
-        """Notify that a trade was executed"""
-        message = "🎯 <b>Trade Executed</b>\n\n"
+        """Notify that an order was placed (fills arrive later)"""
+        message = "📝 <b>Order Placed</b>\n\n"
         message += f"<b>Strategy:</b> {strategy}\n"
         message += f"<b>Market:</b> {market_id[:30]}...\n"
         
@@ -216,6 +216,6 @@ class TelegramNotifier:
     def bot_stopped(self, total_trades: int, final_pnl: float) -> bool:
         """Notify that bot has stopped"""
         message = "🛑 <b>Bot Stopped</b>\n\n"
-        message += f"<b>Total Trades:</b> {total_trades}\n"
+        message += f"<b>Total Fills:</b> {total_trades}\n"
         message += f"<b>Final P&L:</b> ${final_pnl:.2f}"
         return self.send_message(message)

@@ -35,6 +35,11 @@ class ProfitabilityTracker:
         self.trades: List[TradeRecord] = []
         self.initial_capital: float = 0.0
         self.current_capital: float = 0.0
+        # Cumulative counters from prior sessions (restored from persisted state)
+        self.historical_trades: int = 0
+        self.historical_wins: int = 0
+        self.historical_losses: int = 0
+        self.historical_pnl: float = 0.0
         
         # Strategy-specific metrics
         self.strategy_stats: Dict[str, Dict] = defaultdict(lambda: {
@@ -100,11 +105,11 @@ class ProfitabilityTracker:
         Returns:
             Dictionary of overall stats
         """
-        total_trades = len(self.trades)
-        winning_trades = sum(1 for t in self.trades if t.pnl > 0)
-        losing_trades = sum(1 for t in self.trades if t.pnl < 0)
+        total_trades = self.historical_trades + len(self.trades)
+        winning_trades = self.historical_wins + sum(1 for t in self.trades if t.pnl > 0)
+        losing_trades = self.historical_losses + sum(1 for t in self.trades if t.pnl < 0)
         
-        total_pnl = sum(t.pnl for t in self.trades)
+        total_pnl = self.historical_pnl + sum(t.pnl for t in self.trades)
         total_pnl_pct = (total_pnl / self.initial_capital * 100) if self.initial_capital > 0 else 0.0
         
         roi = ((self.current_capital - self.initial_capital) / self.initial_capital * 100) if self.initial_capital > 0 else 0.0

@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 from ..utils.logger import setup_logger
 from ..risk.position_tracker import PositionTracker, Position
@@ -96,10 +96,17 @@ class StateManager:
         }
     
     def _serialize_orders(self, coordinator: OrderCoordinator) -> Dict:
-        """Serialize orders to dict"""
-        orders = []
+        """Serialize orders to dict.
+
+        Cancelled/failed orders are dead and not persisted; filled ones are
+        capped so the state file cannot grow without bound under high re-quote
+        rates. Only pending orders are restored on startup.
+        """
+        MAX_FILLED_SERIALIZED = 200
+        active: List[Dict] = []
+        filled: List[Dict] = []
         for order in coordinator.orders.values():
-            orders.append({
+            record = {
                 'order_id': order.order_id,
                 'market_id': order.market_id,
                 'outcome': order.outcome,
@@ -112,22 +119,34 @@ class StateManager:
                 'updated_at': order.updated_at.isoformat(),
                 'strategy': order.strategy,
                 'metadata': order.metadata
-            })
+            }
+            if order.status in (OrderStatus.CANCELLED, OrderStatus.FAILED):
+                continue
+            if order.status == OrderStatus.FILLED:
+                filled.append(record)
+            else:
+                active.append(record)
+        
+        filled.sort(key=lambda r: r['updated_at'])
+        active.extend(filled[-MAX_FILLED_SERIALIZED:])
         
         return {
-            'all_orders': orders,
+            'all_orders': active,
             'pending_order_ids': list(coordinator.pending_orders)
         }
     
     def _serialize_profitability(self, tracker: Any) -> Dict:
-        """Serialize profitability tracker to dict"""
+        """Serialize profitability tracker to dict (cumulative across sessions)"""
         try:
             stats = tracker.get_overall_stats()
             return {
                 'initial_capital': tracker.initial_capital,
                 'current_capital': tracker.current_capital,
                 'total_trades': stats.get('total_trades', 0),
+                'winning_trades': stats.get('winning_trades', 0),
+                'losing_trades': stats.get('losing_trades', 0),
                 'total_pnl': stats.get('total_pnl', 0.0),
+                'win_rate': stats.get('win_rate', 0.0),
                 'roi': stats.get('roi', 0.0)
             }
         except Exception as e:
@@ -230,6 +249,11 @@ class StateManager:
                 profitability_tracker.current_capital = float(
                     prof.get('current_capital', profitability_tracker.current_capital)
                 )
+                # Cumulative stats so restarts don't reset dashboard counters
+                profitability_tracker.historical_trades = int(prof.get('total_trades', 0))
+                profitability_tracker.historical_wins = int(prof.get('winning_trades', 0))
+                profitability_tracker.historical_losses = int(prof.get('losing_trades', 0))
+                profitability_tracker.historical_pnl = float(prof.get('total_pnl', 0.0))
             
             if closed_pnl:
                 logger.info(f"Restored historical P&L: ${closed_pnl:.2f}")
