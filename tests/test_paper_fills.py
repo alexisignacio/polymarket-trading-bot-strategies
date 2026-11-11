@@ -7,7 +7,7 @@ from src.risk.risk_manager import RiskManager
 from src.utils.profitability_tracker import ProfitabilityTracker
 
 
-def make_system():
+def make_system(fee_lookup=None):
     rm = RiskManager({
         'max_position_size': 1000.0,
         'max_total_exposure': 10000.0,
@@ -17,7 +17,8 @@ def make_system():
     oc = OrderCoordinator()
     pt = ProfitabilityTracker()
     pt.set_initial_capital(1000.0)
-    sim = PaperFillSimulator(oc, rm, pt)
+    # Fee-free markets unless a test says otherwise, so P&L assertions stay exact
+    sim = PaperFillSimulator(oc, rm, pt, fee_lookup=fee_lookup or (lambda mid: {'fee_rate': 0.0}))
     return oc, rm, pt, sim
 
 
@@ -90,6 +91,93 @@ def test_force_close_records_trade():
     assert closed is not None
     assert closed.pnl == pytest.approx(-20.0)
     assert pt.get_overall_stats()['total_trades'] == 1
+
+
+def test_traded_through_buy_fills_at_limit():
+    """Resting bid fills when the market trades down through it (maker)."""
+    oc, rm, pt, sim = make_system()
+    oc.create_order('o1', 'm1', 'YES', 'buy', size=100.0, price=0.50, strategy='test')
+
+    fills = sim.process_fills(lambda mid, oc_: {'bid': 0.47, 'ask': 0.55})
+    assert len(fills) == 1
+    pos = next(iter(rm.position_tracker.positions.values()))
+    assert pos.entry_price == 0.50
+
+
+def test_resting_order_does_not_fill_without_price_move():
+    oc, rm, pt, sim = make_system()
+    oc.create_order('o1', 'm1', 'YES', 'buy', size=100.0, price=0.50, strategy='test')
+    fills = sim.process_fills(lambda mid, oc_: {'bid': 0.50, 'ask': 0.55})
+    assert len(fills) == 0
+
+
+def test_traded_through_sell_fills_at_limit():
+    oc, rm, pt, sim = make_system()
+    oc.create_order('o1', 'm1', 'YES', 'sell', size=100.0, price=0.50, strategy='test')
+    fills = sim.process_fills(lambda mid, oc_: {'bid': 0.40, 'ask': 0.53})
+    assert len(fills) == 1
+
+
+def test_taker_fee_charged_and_maker_fill_free():
+    rates = lambda mid: {'fee_rate': 0.04, 'fee_exponent': 1.0}
+    oc, rm, pt, sim = make_system(fee_lookup=rates)
+
+    # marketable buy (ask <= limit): taker -> fee
+    oc.create_order('o1', 'm1', 'YES', 'buy', size=100.0, price=0.50, strategy='test')
+    sim.process_fills(lambda mid, oc_: {'bid': 0.48, 'ask': 0.49})
+    # shares = 100/0.50 = 200; fee = 200 * 0.04 * 0.5*0.5 = 2.0
+    assert rm.position_tracker.positions['pos_o1'].metadata['entry_fee'] == pytest.approx(2.0)
+
+    # traded-through buy (maker): no fee
+    oc.create_order('o2', 'm2', 'YES', 'buy', size=100.0, price=0.50, strategy='test')
+    sim.process_fills(lambda mid, oc_: {'bid': 0.45, 'ask': 0.55})
+    assert rm.position_tracker.positions['pos_o2'].metadata['entry_fee'] == 0.0
+
+
+def test_fees_reduce_recorded_pnl():
+    rates = lambda mid: {'fee_rate': 0.04, 'fee_exponent': 1.0}
+    oc, rm, pt, sim = make_system(fee_lookup=rates)
+    oc.create_order('o1', 'm1', 'YES', 'buy', size=100.0, price=0.50, strategy='test')
+    sim.process_fills(lambda mid, oc_: {'bid': 0.48, 'ask': 0.49})   # taker entry
+    oc.create_order('o2', 'm1', 'YES', 'sell', size=100.0, price=0.60, strategy='test')
+    sim.process_fills(lambda mid, oc_: {'bid': 0.61, 'ask': 0.62})   # taker exit
+
+    # gross 20.0; entry fee 2.0; exit fee = 200 * 0.04 * 0.6*0.4 = 1.92
+    expected = 20.0 - 2.0 - 1.92
+    closed = rm.position_tracker.closed_positions[0]
+    assert closed.pnl == pytest.approx(expected)
+    assert closed.metadata['fees'] == pytest.approx(3.92)
+    assert pt.get_overall_stats()['total_pnl'] == pytest.approx(expected)
+
+
+def test_settlement_close_charges_no_exit_fee():
+    rates = lambda mid: {'fee_rate': 0.04, 'fee_exponent': 1.0}
+    oc, rm, pt, sim = make_system(fee_lookup=rates)
+    oc.create_order('o1', 'm1', 'YES', 'buy', size=100.0, price=0.50, strategy='test')
+    sim.process_fills(lambda mid, oc_: {'bid': 0.48, 'ask': 0.49})  # entry fee 2.0
+    pos_id = next(iter(rm.position_tracker.positions))
+
+    closed = sim.force_close(pos_id, 1.0, reason='market_resolved', charge_exit_fee=False)
+    assert closed.pnl == pytest.approx(100.0 - 2.0)  # gross 100, only entry fee
+    assert closed.metadata['fees'] == pytest.approx(2.0)
+
+
+def test_unknown_fee_config_uses_conservative_default():
+    oc, rm, pt, sim = make_system(fee_lookup=lambda mid: None)
+    oc.create_order('o1', 'm1', 'YES', 'buy', size=100.0, price=0.50, strategy='test')
+    sim.process_fills(lambda mid, oc_: {'bid': 0.48, 'ask': 0.49})
+    pos = next(iter(rm.position_tracker.positions.values()))
+    # default rate 0.05: 200 * 0.05 * 0.25 = 2.5
+    assert pos.metadata['entry_fee'] == pytest.approx(2.5)
+
+
+def test_taker_fee_formula_matches_polymarket_tables():
+    from src.core.paper_fills import taker_fee
+    assert taker_fee(100, 0.50, 0.07) == pytest.approx(1.75)  # crypto @ 50c
+    assert taker_fee(100, 0.30, 0.05) == pytest.approx(1.05)  # sports @ 30c
+    assert taker_fee(100, 0.99, 0.04) == pytest.approx(0.04, abs=0.001)  # politics @ 99c
+    assert taker_fee(100, 0.50, 0.0) == 0.0
+    assert taker_fee(0, 0.50, 0.05) == 0.0
 
 
 def test_duplicate_order_rejected_only_within_window():

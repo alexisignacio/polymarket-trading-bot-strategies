@@ -8,6 +8,7 @@ Everything is best-effort: if Gamma is unreachable the client returns an empty
 map and callers treat metadata as unknown instead of crashing.
 """
 
+import json
 import threading
 import time
 from typing import Dict
@@ -18,6 +19,22 @@ from ..utils.logger import setup_logger
 
 
 logger = setup_logger(__name__)
+
+
+def _fee_schedule_fields(fee_schedule) -> Dict[str, float]:
+    """Normalize Gamma's feeSchedule (dict or JSON string) into flat fields."""
+    if isinstance(fee_schedule, str):
+        try:
+            fee_schedule = json.loads(fee_schedule)
+        except (ValueError, TypeError):
+            fee_schedule = None
+    if not isinstance(fee_schedule, dict):
+        return {"fee_rate": 0.0, "fee_exponent": 1.0, "taker_only": True}
+    return {
+        "fee_rate": float(fee_schedule.get("rate") or 0.0),
+        "fee_exponent": float(fee_schedule.get("exponent") or 1.0),
+        "taker_only": bool(fee_schedule.get("takerOnly", True)),
+    }
 
 
 class GammaClient:
@@ -33,7 +50,8 @@ class GammaClient:
         self._lock = threading.Lock()
 
     def get_metadata(self, condition_ids=None) -> Dict[str, Dict]:
-        """Return {condition_id: {'volume', 'liquidity', 'created_at'}}.
+        """Return {condition_id: {'volume', 'liquidity', 'created_at',
+        'fees_enabled', 'fee_rate', 'fee_exponent', 'taker_only'}}.
 
         The cache holds *all* active markets; `condition_ids` only narrows the
         returned map. Unknown ids are simply absent from the result.
@@ -76,6 +94,8 @@ class GammaClient:
                         "volume": float(raw.get("volumeNum") or 0.0),
                         "liquidity": float(raw.get("liquidityNum") or 0.0),
                         "created_at": raw.get("createdAt"),
+                        "fees_enabled": bool(raw.get("feesEnabled")),
+                        **_fee_schedule_fields(raw.get("feeSchedule")),
                     }
 
                 if len(page) < self.PAGE_SIZE:

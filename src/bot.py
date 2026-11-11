@@ -128,7 +128,8 @@ class TradingBot:
         self.paper_fills = PaperFillSimulator(
             self.order_coordinator,
             self.risk_manager,
-            self.profitability_tracker
+            self.profitability_tracker,
+            fee_lookup=self._fee_config
         ) if paper_trading else None
         
         # State management
@@ -249,10 +250,23 @@ class TradingBot:
                 return None
             raise
     
+    def _fee_config(self, market_id: str):
+        """Fee schedule for a market (Gamma metadata), None when unknown."""
+        try:
+            gamma = getattr(getattr(self.polymarket_client, 'rest_client', None), 'gamma', None)
+            if gamma is None:
+                return None
+            return gamma.get_metadata([market_id]).get(market_id)
+        except Exception:
+            return None
+    
     def _reconcile_close(self, position_id: str, exit_price: float, reason: str) -> None:
-        """Close a restored position during reconciliation (paper-aware)."""
+        """Close a restored position during reconciliation (paper-aware).
+
+        Market settlement/redemption is not a trade: no exit fee is charged.
+        """
         if self.paper_fills:
-            self.paper_fills.force_close(position_id, exit_price, reason)
+            self.paper_fills.force_close(position_id, exit_price, reason, charge_exit_fee=False)
         else:
             closed = self.risk_manager.close_position(position_id, exit_price)
             if closed:
