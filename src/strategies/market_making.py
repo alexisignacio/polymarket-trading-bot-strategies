@@ -67,10 +67,13 @@ class MarketMakingStrategy(BaseStrategy):
         self.outcome = self.config.get('outcome', 'YES')  # Outcome to trade
         self.min_order_size = self.config.get('min_order_size', 1.0)  # Minimum order size
         self.max_age_hours = self.config.get('max_age_hours', 24) # Target new markets (default <24h)
+        # Requote only when the mid moves at least this much (otherwise the
+        # strategy cancels and replaces every order on every iteration)
+        self.min_requote_move = self.config.get('min_requote_move', 0.01)
         
         # Track our orders per market
-        self.market_orders: Dict[str, Dict[str, List[OrderInBand]]] = {}  # market_id -> side -> orders
         self.last_update_time: Dict[str, float] = {}  # market_id -> timestamp
+        self.last_quoted_mid: Dict[str, float] = {}  # market_id -> mid at last sync
         
         # Band configurations
         self.buy_bands: List[Band] = self._parse_bands(self.bands_config.get('buyBands', []))
@@ -196,11 +199,16 @@ class MarketMakingStrategy(BaseStrategy):
                     
                     mid_price = (bid + ask) / 2
                     
-                    # Check if we need to update orders for this market
+                    # Check if we need to update orders for this market:
+                    # interval elapsed AND mid moved materially since our last
+                    # sync (quoting regardless of movement churns the whole
+                    # book every few seconds)
                     last_update = self.last_update_time.get(market_id, 0)
                     time_since_update = time.time() - last_update
+                    last_mid = self.last_quoted_mid.get(market_id)
+                    moved = last_mid is None or abs(mid_price - last_mid) >= self.min_requote_move
                     
-                    if time_since_update >= self.update_interval:
+                    if time_since_update >= self.update_interval and moved:
                         opportunity = {
                             'market_id': market_id,
                             'outcome': self.outcome,
@@ -244,6 +252,7 @@ class MarketMakingStrategy(BaseStrategy):
             
             # Update last update time
             self.last_update_time[market_id] = time.time()
+            self.last_quoted_mid[market_id] = mid_price
             
             if cancel_count > 0 or place_count > 0:
                 trade_logger.info(

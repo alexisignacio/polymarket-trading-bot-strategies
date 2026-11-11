@@ -6,6 +6,10 @@ python-dateutil>=2.8.0
 python-telegram-bot>=20.0
 eth-account>=0.8.0
 
+# Live order signing/submission (EIP-712 + CLOB auth) - only used when
+# paper_trading is off AND POLYMARKET_LIVE_TRADING=I_UNDERSTAND is set
+polymarket-apis>=2.3.0
+
 # Dashboard
 fastapi>=0.100.0
 uvicorn>=0.23.0

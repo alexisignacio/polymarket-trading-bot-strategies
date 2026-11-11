@@ -61,6 +61,18 @@ class PolymarketRESTClient:
         
         # Metadata (volume/liquidity/created_at) from Gamma - CLOB lacks these
         self.gamma = GammaClient()
+        
+        # Live order execution (created lazily; see live_orders.py safety gates)
+        self._live = None
+    
+    def _live_executor(self):
+        """Lazy LiveOrderExecutor; requires private key + env opt-in."""
+        if self._live is None:
+            if not self.private_key:
+                raise ValueError("Live trading requires POLYMARKET_PRIVATE_KEY")
+            from .live_orders import LiveOrderExecutor
+            self._live = LiveOrderExecutor(private_key=self.private_key)
+        return self._live
     
     def _request(self, method: str, endpoint: str, **kwargs) -> Dict:
         """Make API request with rate limiting"""
@@ -317,36 +329,25 @@ class PolymarketRESTClient:
                 'paper_trading': True
             }
         
-        endpoint = "/orders"
-        data = {
-            'market': market_id,
-            'outcome': outcome,
-            'side': side,
-            'size': str(shares),
-            'price': str(price)
-        }
-        
-        return self._request('POST', endpoint, json=data)
+        # Live: signed order via the official SDK (see live_orders.py gates)
+        resolved = self.resolve_token_id(market_id, outcome)
+        if not resolved:
+            raise ValueError(f"Cannot resolve token for {market_id} {outcome}")
+        return self._live_executor().place_limit_order(resolved, side, price, shares)
     
     def cancel_order(self, order_id: str) -> Dict:
         """Cancel order"""
         if self.paper_trading:
             return {'status': 'cancelled', 'paper_trading': True}
         
-        endpoint = f"/orders/{order_id}"
-        return self._request('DELETE', endpoint)
+        return self._live_executor().cancel_order(order_id)
     
     def get_orders(self, market_id: Optional[str] = None, status: str = "open") -> List[Dict]:
         """Get orders"""
         if self.paper_trading:
             return []
         
-        endpoint = "/orders"
-        params = {'status': status}
-        if market_id:
-            params['market'] = market_id
-        
-        return self._request('GET', endpoint, params=params)
+        return self._live_executor().get_open_orders()
     
     def get_positions(self, market_id: Optional[str] = None) -> List[Dict]:
         """Get positions"""

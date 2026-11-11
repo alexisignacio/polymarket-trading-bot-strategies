@@ -33,7 +33,7 @@
 
 ## 🎯 Overview
 
-**PolyHFT** is a trading bot for Polymarket prediction markets. It runs 4 trading strategies against real market data with simulated (paper) fills — live order execution is NOT implemented.
+**PolyHFT** is a trading bot for Polymarket prediction markets. It runs 4 trading strategies against real market data with simulated (paper) fills by default. A gated live-order path exists (see below) but paper trading remains strongly recommended.
 
 ### Key Highlights
 
@@ -44,7 +44,13 @@
 - 📱 **Real-time Notifications**: Telegram integration for instant trade alerts
 - 🌐 **Web Dashboard**: local dashboard for status, metrics, positions and strategy toggles
 
-> **Honest status**: this is a research/paper-trading system. The CLOB live-trading path (signed EIP-712 orders) is not implemented — `paper_trading: true` is effectively mandatory.
+> **Honest status**: this is a research/paper-trading system. Live order
+> execution exists (signed EIP-712 orders via the official `polymarket-apis`
+> SDK) but is behind a double gate — `paper_trading: false` AND
+> `POLYMARKET_LIVE_TRADING=I_UNDERSTAND` in the environment. The strategies
+> are NOT validated for profitability (tiny sample, see
+> `scripts/audit_trades.py`); do not run live without understanding you can
+> lose your full stake on a single tail-end trade.
 
 ---
 
@@ -116,7 +122,11 @@
 ### 4. Continuous Market Making 📊 [BETA]
 **Band-based order management around market price**
 
-⚠️ **BETA STATUS**: This strategy is under evaluation. Use with caution and monitor closely.
+⚠️ **BETA STATUS**: This strategy is under evaluation. Kept for the
+liquidity-rewards (maker rebates) research line and disabled by default.
+Profitability is NOT validated — paper fills cannot honestly model the
+adverse selection that kills market makers. Requotes only on material mid
+moves (`min_requote_move`); band amounts must fit `risk.max_position_size`.
 
 - Maintains orders in configurable bands around market price
 - Continuously adjusts orders as market moves (every second)
