@@ -69,26 +69,31 @@ def normalize_market(raw: Dict) -> Dict:
     return market
 
 
-def best_bid_ask(orderbook: Dict) -> Tuple[Optional[float], Optional[float]]:
-    """Extract best bid/ask from an orderbook, independent of level ordering.
+def best_bid_ask(orderbook: Dict) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    """Extract (best_bid, best_ask, bid_size, ask_size) from an unordered book.
 
     CLOB returns bids ascending and asks descending (worst price first in both),
     so indexing [0] gives the *worst* prices. Best bid is the highest bid, best
-    ask the lowest ask.
+    ask the lowest ask. Sizes are the shares available at those best levels
+    (summed if the price repeats); None when the level is absent.
     """
-    def _price(level) -> float:
+    def _level(level) -> tuple:
         if isinstance(level, dict):
-            return float(level.get('price', 0) or 0)
+            return float(level.get('price', 0) or 0), float(level.get('size', 0) or 0)
         if isinstance(level, (list, tuple)) and level:
-            return float(level[0])
-        return 0.0
+            price = float(level[0])
+            size = float(level[1]) if len(level) > 1 else 0.0
+            return price, size
+        return 0.0, 0.0
 
     bids = orderbook.get('bids') or []
     asks = orderbook.get('asks') or []
 
-    bid_prices = [p for p in map(_price, bids) if 0 < p < 1]
-    ask_prices = [p for p in map(_price, asks) if 0 < p < 1]
+    bid_levels = [(p, s) for p, s in map(_level, bids) if 0 < p < 1]
+    ask_levels = [(p, s) for p, s in map(_level, asks) if 0 < p < 1]
 
-    best_bid = max(bid_prices) if bid_prices else None
-    best_ask = min(ask_prices) if ask_prices else None
-    return best_bid, best_ask
+    best_bid = max((p for p, _ in bid_levels), default=None)
+    best_ask = min((p for p, _ in ask_levels), default=None)
+    bid_size = sum(s for p, s in bid_levels if p == best_bid) if best_bid is not None else None
+    ask_size = sum(s for p, s in ask_levels if p == best_ask) if best_ask is not None else None
+    return best_bid, best_ask, bid_size or None, ask_size or None

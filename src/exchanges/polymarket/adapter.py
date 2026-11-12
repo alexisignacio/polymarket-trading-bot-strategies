@@ -138,14 +138,16 @@ class PolymarketAdapter(BaseExchange):
         return self.rest_client.get_orderbook(market_id, outcome)
     
     def get_best_price(self, market_id: str, outcome: str = "YES") -> Dict:
-        """Get best prices (handles unordered books: best bid = max, best ask = min)"""
+        """Get best prices and level sizes (best bid = max, best ask = min)"""
         orderbook = self.get_orderbook(market_id, outcome)
         
-        best_bid, best_ask = best_bid_ask(orderbook)
+        best_bid, best_ask, bid_size, ask_size = best_bid_ask(orderbook)
         
         prices = {
             'bid': best_bid,
             'ask': best_ask,
+            'bid_size': bid_size,
+            'ask_size': ask_size,
             'spread': best_ask - best_bid if (best_bid and best_ask) else None
         }
         
@@ -224,12 +226,14 @@ class PolymarketAdapter(BaseExchange):
             book = by_asset.get(str(token_id))
             if not book:
                 continue
-            best_bid, best_ask = best_bid_ask(book)
+            best_bid, best_ask, bid_size, ask_size = best_bid_ask(book)
             if best_bid is None and best_ask is None:
                 continue
             results[key] = {
                 'bid': best_bid,
                 'ask': best_ask,
+                'bid_size': bid_size,
+                'ask_size': ask_size,
                 'spread': best_ask - best_bid if (best_bid and best_ask) else None
             }
         return results

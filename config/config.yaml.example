@@ -40,16 +40,7 @@ api:
 # Strategy Configurations
 
 strategies:
-  # Strategy 1: Single-Market Arbitrage
-  # Buy YES + NO when combined ask < $1.00 (risk-free profit at resolution)
-  single_arbitrage:
-    enabled: true
-    max_total_price: 0.99  # Maximum total price for YES+NO ($0.99)
-    min_profit_pct: 1.0  # Minimum profit percentage (1%)
-    position_size: 10.0  # USD notional per outcome (must be <= risk.max_position_size)
-    require_clear_resolution: true  # Only trade markets with clear resolution rules
-
-  # Strategy 2: Continuous Market Making (Band-Based Order Management) [BETA]
+  # Strategy 1: Continuous Market Making (Band-Based Order Management) [BETA]
   # Maintains orders in bands around market price, continuously adjusting as market moves
   # Based on polymarket-marketmaking approach: https://github.com/elielieli909/polymarket-marketmaking
   # WARNING: BETA - under evaluation. Use with caution and monitor closely.
@@ -62,7 +53,7 @@ strategies:
     outcome: "YES"  # Outcome to trade (YES or NO)
     min_order_size: 1.0  # Minimum order size in USD notional
 
-  # Strategy 3: Spread Scalping
+  # Strategy 2: Spread Scalping
   # Scalps spreads on liquid markets with >3 days to expiry
   spread_scalping:
     enabled: true
@@ -75,7 +66,7 @@ strategies:
     markets_per_scan: 1000      # Markets to check per iteration (rotating scan)
     full_scan_interval: 10      # Reset cursor every N iterations to catch new markets
 
-  # Strategy 4: Tail-End Trading (High Probability)
+  # Strategy 3: Tail-End Trading (High Probability)
   # Buy outcomes >$0.93 near expiry (<7 days) for safe returns
   tail_end:
     enabled: true

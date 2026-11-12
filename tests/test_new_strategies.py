@@ -56,7 +56,34 @@ class TestNewStrategies(unittest.TestCase):
         self.assertEqual(len(opportunities), 1)
         self.assertEqual(opportunities[0]['market_id'], 'm1')
         self.assertEqual(opportunities[0]['price'], 0.95)
+        # Fee-aware economics: net return below gross, breakeven above the price
+        self.assertLess(opportunities[0]['return_pct'], opportunities[0]['gross_return_pct'])
+        self.assertGreater(opportunities[0]['breakeven_win_prob'], 0.95)
         print("✅ Tail End Strategy verified")
+
+    def test_tail_end_rejects_when_fees_eat_the_edge(self):
+        """Con fees de taker altas el retorno neto cae bajo el mínimo y no entra"""
+        self.mock_risk_manager.position_tracker.get_positions_by_strategy.return_value = []
+        self.mock_risk_manager.position_tracker.get_positions_by_market.return_value = []
+        self.mock_client._order_coordinator = None
+        self.mock_market_cache.get_prices_parallel.side_effect = (
+            lambda pairs: {f"{m}_{o}": self.mock_market_cache.get_price(m, o) for m, o in pairs}
+        )
+        strategy = TailEndStrategy(
+            name="tail_end",
+            polymarket_client=self.mock_client,
+            risk_manager=self.mock_risk_manager,
+            config={'min_price': 0.90, 'max_price': 0.99, 'max_days_to_expiry': 7,
+                    'min_return_pct': 2.0, 'max_spread_pct': 5.0, 'taker_fee_rate': 5.0},
+            market_cache=self.mock_market_cache
+        )
+        future_date = (datetime.utcnow() + timedelta(days=3)).isoformat()
+        self.mock_market_cache.get_markets.return_value = [
+            {'id': 'm1', 'question': 'Will X happen?', 'end_date_iso': future_date,
+             'tokens': [{'token_id': 't1', 'outcome': 'YES'}]}
+        ]
+        self.mock_market_cache.get_price.side_effect = lambda mid, outcome: {'bid': 0.94, 'ask': 0.95}
+        self.assertEqual(strategy.scan_opportunities(), [])
 
     def test_spread_scalping_cancels_stale_orders(self):
         """Unfilled resting orders must expire, or they block the scan forever"""

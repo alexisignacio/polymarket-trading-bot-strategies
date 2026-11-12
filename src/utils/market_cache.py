@@ -161,9 +161,13 @@ class MarketCache:
             ws_cache = self.polymarket_client.ws_client.get_orderbook(market_id, outcome)
             if ws_cache:
                 # Convert orderbook to price format (books arrive unordered)
-                best_bid, best_ask = best_bid_ask(ws_cache)
+                best_bid, best_ask, bid_size, ask_size = best_bid_ask(ws_cache)
                 if best_bid and best_ask:
-                    prices = {'bid': best_bid, 'ask': best_ask, 'spread': best_ask - best_bid}
+                    prices = {
+                        'bid': best_bid, 'ask': best_ask,
+                        'bid_size': bid_size, 'ask_size': ask_size,
+                        'spread': best_ask - best_bid
+                    }
                     self._price_cache[cache_key] = prices
                     self._price_cache_timestamp[cache_key] = current_time
                     return prices

@@ -11,8 +11,16 @@ Fill model (book-snapshot proxies, both price levels matter):
              or when best ask >  P              (market traded up through our
              resting ask -> maker)
 
-The traded-through proxy cannot distinguish "our level was consumed" from
-"quotes were pulled"; it is the standard snapshot-based approximation.
+Marketable (crossing) fills additionally require the crossed level's published
+size to cover the order in full; thinner books do not fill (partial fills are
+not modeled).
+
+Maker (traded-through) fills require FLOW EVIDENCE: a real trade print on the
+same outcome at (or through) the order price inside maker_flow_window seconds
+(Wall Street prints from the Data API). Without it, a quote move alone (the
+market maker pulling bids) would fill us even though nobody traded at our
+level — measured against real prints, that proxy confirmed only ~2% of paper
+entries. When trades_lookup is absent, maker fills are blocked (fail-closed).
 
 Fees (Polymarket: taker-only, fee = shares x rate x p x (1-p), rounded to 5
 decimals): taker fills pay the market's feeSchedule rate; maker fills pay
@@ -28,6 +36,7 @@ On fill the simulator:
 """
 
 from datetime import datetime
+import time
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .order_coordinator import Order, OrderCoordinator, OrderStatus
@@ -68,12 +77,16 @@ class PaperFillSimulator:
         order_coordinator: OrderCoordinator,
         risk_manager: RiskManager,
         profitability_tracker: Optional[ProfitabilityTracker] = None,
-        fee_lookup: Optional[Callable[[str], Optional[Dict]]] = None
+        fee_lookup: Optional[Callable[[str], Optional[Dict]]] = None,
+        trades_lookup: Optional[Callable[[str], List[Dict]]] = None,
+        maker_flow_window: float = 120.0
     ):
         self.order_coordinator = order_coordinator
         self.risk_manager = risk_manager
         self.profitability_tracker = profitability_tracker
         self.fee_lookup = fee_lookup
+        self.trades_lookup = trades_lookup
+        self.maker_flow_window = maker_flow_window
 
     def _fee_config(self, market_id: str) -> Tuple[float, float]:
         """(taker_rate, exponent) for a market; conservative default if unknown."""
@@ -87,6 +100,35 @@ class PaperFillSimulator:
                 exponent = float(cfg.get('fee_exponent') or DEFAULT_FEE_EXPONENT)
                 return rate, exponent
         return DEFAULT_TAKER_FEE_RATE, DEFAULT_FEE_EXPONENT
+
+    def _flow_confirming(self, order: Order, max_price: Optional[float] = None,
+                         min_price: Optional[float] = None) -> bool:
+        """True when the market really printed at/through our price, recently.
+
+        Requires trades_lookup (real prints); without it maker fills are
+        blocked. Prints must match the order's outcome and fall inside
+        maker_flow_window seconds of now.
+        """
+        if self.trades_lookup is None:
+            return False
+        now = time.time()
+        try:
+            prints = self.trades_lookup(order.market_id) or []
+        except Exception:
+            return False
+        wanted = str(order.outcome or '').upper()
+        for print_ in prints:
+            if str(print_.get('outcome') or '').upper() != wanted:
+                continue
+            ts = float(print_.get('timestamp') or 0)
+            if ts <= 0 or now - ts > self.maker_flow_window:
+                continue
+            price = float(print_.get('price') or 0)
+            if max_price is not None and price <= max_price + 1e-9:
+                return True
+            if min_price is not None and price >= min_price - 1e-9:
+                return True
+        return False
 
     def process_fills(self, price_lookup: Callable[[str, str], Optional[Dict]]) -> List[Order]:
         """Try to fill every pending order against current market prices.
@@ -107,20 +149,29 @@ class PaperFillSimulator:
 
             bid = prices.get('bid')
             ask = prices.get('ask')
+            bid_size = prices.get('bid_size')
+            ask_size = prices.get('ask_size')
+            shares = order.size / order.price if order.price > 0 else 0.0
 
             # (fill_price, is_taker): see module docstring for the fill model
             fill_price: Optional[float] = None
             is_taker = False
             if order.side == 'buy':
                 if ask is not None and ask <= order.price:
-                    fill_price, is_taker = order.price, True
+                    # Marketable: we consume the ask level, which must cover us
+                    if ask_size is not None and ask_size >= shares:
+                        fill_price, is_taker = order.price, True
                 elif bid is not None and bid < order.price:
-                    fill_price, is_taker = order.price, False
+                    # Traded-through: only with real print flow at our price
+                    if self._flow_confirming(order, max_price=order.price):
+                        fill_price, is_taker = order.price, False
             elif order.side == 'sell':
                 if bid is not None and bid >= order.price:
-                    fill_price, is_taker = order.price, True
+                    if bid_size is not None and bid_size >= shares:
+                        fill_price, is_taker = order.price, True
                 elif ask is not None and ask > order.price:
-                    fill_price, is_taker = order.price, False
+                    if self._flow_confirming(order, min_price=order.price):
+                        fill_price, is_taker = order.price, False
 
             if fill_price is None:
                 continue
@@ -268,7 +319,8 @@ class PaperFillSimulator:
                 side=closed.side,
                 pnl=closed.pnl,
                 pnl_pct=closed.pnl_pct,
-                fees=float(closed.metadata.get('fees') or 0.0)
+                fees=float(closed.metadata.get('fees') or 0.0),
+                outcome=str(getattr(closed, 'outcome', 'YES') or 'YES')
             )
             self.profitability_tracker.record_trade(trade)
         except Exception as e:

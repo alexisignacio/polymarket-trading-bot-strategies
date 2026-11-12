@@ -283,6 +283,32 @@
           </tbody>
         </table>
       </div>
+
+      <div class="mt-5 pt-4 border-t border-slate-800/60">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-xs font-bold text-white tracking-wide">Calibración por precio de entrada</h3>
+          <span class="text-[10px] text-slate-500">win% real vs probabilidad implícita del precio</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-800/50 uppercase text-[11px] text-slate-400 font-semibold tracking-wider">
+              <tr>
+                <th class="py-2 px-3 rounded-l-lg">Precio</th>
+                <th class="py-2 px-3">Trades</th>
+                <th class="py-2 px-3">Win rate</th>
+                <th class="py-2 px-3">Precio medio</th>
+                <th class="py-2 px-3">Equilibrio</th>
+                <th class="py-2 px-4 rounded-r-lg text-right">Edge (pp)</th>
+              </tr>
+            </thead>
+            <tbody id="calibrationTableBody" class="divide-y divide-slate-800">
+              <tr>
+                <td colspan="6" class="py-4 text-center text-slate-500">Sin datos de calibración aún</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <!-- Strategy Control Section -->
@@ -586,6 +612,41 @@
       }
     }
 
+    // Fetch Calibration (entry price vs observed win rate)
+    async function fetchCalibration() {
+      try {
+        const res = await fetch('/api/calibration');
+        const data = await res.json();
+        const tbody = document.getElementById('calibrationTableBody');
+        const rows = (data.buckets || []).filter(b => b.trades > 0);
+
+        if (rows.length === 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="6" class="py-4 text-center text-slate-500">Sin datos de calibración aún</td>
+            </tr>`;
+          return;
+        }
+
+        tbody.innerHTML = rows.map(b => {
+          const edge = b.edge_pp || 0;
+          const edgeClass = edge >= 0 ? 'text-emerald-400' : 'text-rose-400';
+          return `
+            <tr class="hover:bg-slate-800/30 transition">
+              <td class="py-2 px-3 font-mono text-slate-200">${escapeHtml(b.bucket)}</td>
+              <td class="py-2 px-3 font-mono">${b.trades}</td>
+              <td class="py-2 px-3 font-mono">${b.win_rate.toFixed(1)}%</td>
+              <td class="py-2 px-3 font-mono text-slate-400">${b.avg_price.toFixed(3)}</td>
+              <td class="py-2 px-3 font-mono text-slate-400">${b.breakeven_win_rate.toFixed(1)}%</td>
+              <td class="py-2 px-4 text-right font-mono font-bold ${edgeClass}">${edge >= 0 ? '+' : ''}${edge.toFixed(1)}</td>
+            </tr>`;
+        }).join('');
+
+      } catch (err) {
+        console.error('Error fetching calibration:', err);
+      }
+    }
+
     // Fetch Strategies
     async function fetchStrategies() {
       try {
@@ -694,6 +755,7 @@
       fetchMetrics();
       fetchPositions();
       fetchTrades();
+      fetchCalibration();
       fetchStrategies();
       fetchLogs();
 
@@ -705,7 +767,7 @@
       }, 2500);
 
       // Trade history changes slowly
-      setInterval(fetchTrades, 10000);
+      setInterval(() => { fetchTrades(); fetchCalibration(); }, 10000);
 
       // Poll logs every 3 seconds
       setInterval(fetchLogs, 3000);

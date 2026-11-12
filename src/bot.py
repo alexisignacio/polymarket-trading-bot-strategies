@@ -9,6 +9,7 @@ from typing import Dict, Optional
 from .exchanges.polymarket.adapter import PolymarketAdapter
 from .api.perpdex_client import PerpdexClient
 from .api.auth import AuthManager
+from .api.data_api import DataAPIClient
 from .risk.risk_manager import RiskManager
 from .core.order_coordinator import OrderCoordinator
 from .core.paper_fills import PaperFillSimulator
@@ -16,7 +17,6 @@ from .core.state_manager import StateManager
 from .core.state_reconciler import reconcile_restored_state
 from .utils.api_health_check import APIHealthCheck
 from .strategies.base_strategy import BaseStrategy
-from .strategies.single_arbitrage import SingleArbitrageStrategy
 from .strategies.market_making import MarketMakingStrategy
 from .strategies.spread_scalping import SpreadScalpingStrategy
 from .strategies.tail_end_strategy import TailEndStrategy
@@ -125,11 +125,13 @@ class TradingBot:
         self.profitability_tracker.set_initial_capital(initial_capital)
         
         # Paper fill simulator (fills pending paper orders against real prices)
+        self.data_api = DataAPIClient()
         self.paper_fills = PaperFillSimulator(
             self.order_coordinator,
             self.risk_manager,
             self.profitability_tracker,
-            fee_lookup=self._fee_config
+            fee_lookup=self._fee_config,
+            trades_lookup=self.data_api.recent_trades
         ) if paper_trading else None
         
         # State management
@@ -166,17 +168,6 @@ class TradingBot:
     
     def _initialize_strategies(self) -> None:
         """Initialize all trading strategies"""
-        # Single arbitrage strategy
-        single_arb_config = self.config_loader.get_strategy_config('single_arbitrage')
-        if single_arb_config.get('enabled', False):
-            self.strategies['single_arbitrage'] = SingleArbitrageStrategy(
-                name='single_arbitrage',
-                polymarket_client=self.polymarket_client,
-                risk_manager=self.risk_manager,
-                config=single_arb_config,
-                market_cache=self.market_cache
-            )
-        
         # Market-making strategy (continuous band-based order management)
         market_making_config = self.config_loader.get_strategy_config('market_making')
         if market_making_config.get('enabled', False):

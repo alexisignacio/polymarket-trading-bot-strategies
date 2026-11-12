@@ -222,7 +222,7 @@ def test_full_pipeline_settles_through_paper_fills():
     sim = PaperFillSimulator(oc, rm, pt, fee_lookup=lambda mid: {'fee_rate': 0.0})
 
     oc.create_order('o1', 'm_resolved', 'NO', 'buy', size=5.0, price=0.93, strategy='tail_end')
-    fills = sim.process_fills(lambda mid, outcome: {'bid': 0.92, 'ask': 0.93})
+    fills = sim.process_fills(lambda mid, outcome: {'bid': 0.92, 'ask': 0.93, 'bid_size': 1000.0, 'ask_size': 1000.0})
     assert len(fills) == 1
     assert len(rm.position_tracker.positions) == 1
 

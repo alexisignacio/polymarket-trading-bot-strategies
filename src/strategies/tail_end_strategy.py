@@ -35,9 +35,12 @@ class TailEndStrategy(BaseStrategy):
         self.position_size = self.config.get('position_size', 5.0)
         self.max_positions = self.config.get('max_positions', 10)
 
-        # Entry economics: gross return at resolution must clear this
+        # Entry economics: return at resolution NET of entry fees must clear
+        # this. taker_fee_rate is the Polymarket feeSchedule rate (entry at the
+        # ask is a taker fill); settlement/redemption pays no exit fee.
         self.min_return_pct = self.config.get('min_return_pct', 2.0)
         self.max_spread_pct = self.config.get('max_spread_pct', 3.0)
+        self.taker_fee_rate = self.config.get('taker_fee_rate', 0.05)
 
         # Exit parameters (these actually place sell orders now)
         self.take_profit = self.config.get('take_profit', 0.99)
@@ -116,12 +119,20 @@ class TailEndStrategy(BaseStrategy):
                         if not (self.min_price <= ask <= self.max_price):
                             continue
 
-                        # Honest EV: gross return if held to resolution
                         if ask <= 0:
                             continue
-                        return_pct = ((1.0 - ask) / ask) * 100
-                        if return_pct < self.min_return_pct:
+
+                        # Entry at the ask is a taker fill: per-share fee is
+                        # rate*p*(1-p), so the honest economics are:
+                        #   cost/share       = ask + fee
+                        #   net return (win) = (1 - cost) / cost
+                        #   breakeven win p  = cost (payout 1.0 at resolution)
+                        fee_per_share = self.taker_fee_rate * ask * (1.0 - ask)
+                        cost_per_share = ask + fee_per_share
+                        net_return_pct = ((1.0 - cost_per_share) / cost_per_share) * 100
+                        if net_return_pct < self.min_return_pct:
                             continue
+                        breakeven_win_prob = cost_per_share
 
                         # The spread must not eat the edge on an early exit
                         spread_pct = ((ask - bid) / ask) * 100 if (ask > bid > 0) else 100.0
@@ -130,7 +141,8 @@ class TailEndStrategy(BaseStrategy):
 
                         logger.info(
                             f"[{self.name}] Found opportunity: {market.get('question')} | "
-                            f"{outcome} @ {ask} (return {return_pct:.1f}%, spread {spread_pct:.1f}%)"
+                            f"{outcome} @ {ask} (net return {net_return_pct:.1f}%, "
+                            f"breakeven win {breakeven_win_prob * 100:.1f}%, spread {spread_pct:.1f}%)"
                         )
 
                         opportunities.append({
@@ -138,7 +150,10 @@ class TailEndStrategy(BaseStrategy):
                             'token_id': token_id,
                             'outcome': outcome,
                             'price': ask,
-                            'return_pct': return_pct,
+                            'return_pct': net_return_pct,
+                            'gross_return_pct': ((1.0 - ask) / ask) * 100,
+                            'breakeven_win_prob': breakeven_win_prob,
+                            'fee_per_share': fee_per_share,
                             'spread_pct': spread_pct,
                             'question': market.get('question'),
                             'end_date': end_date_str

@@ -222,6 +222,20 @@ def get_strategy_stats():
     return (state.get("profitability") or {}).get("strategy_stats") or {}
 
 
+@app.get("/api/calibration")
+def get_calibration():
+    """Price-bucket calibration: entry price vs observed win rate."""
+    import sys
+    sys.path.insert(0, str(BASE_DIR))
+    from src.utils.calibration import price_calibration
+    state = load_state()
+    records = (state.get("profitability") or {}).get("trade_history") or []
+    return {
+        "trades": len(records),
+        "buckets": price_calibration(records),
+    }
+
+
 @app.get("/api/strategies")
 def get_strategies():
     """List all strategies and their config"""

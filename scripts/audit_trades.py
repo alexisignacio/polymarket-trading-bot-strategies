@@ -18,6 +18,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from src.utils.calibration import price_calibration  # noqa: E402
+
 MIN_SAMPLE = 30  # below this, everything is flagged as indicative only
 
 # 2026-11-11 16:08:17 - 📝 [PAPER CLOSE] pos_x @ 0.9480 P&L $0.33 (6.53%) fees $0.0000 reason
@@ -56,6 +59,8 @@ def parse_log_closes(path: Path) -> list:
 
 
 def sample_warning(n: int) -> str:
+    if n >= MIN_SAMPLE:
+        return ""
     return f"  [!] muestra N={n} < {MIN_SAMPLE}: TODO es indicativo, no concluyente"
 
 
@@ -82,7 +87,8 @@ def report_records(records: list) -> None:
     if losses:
         print(f"  Pérdida media:   ${sum(r['pnl'] for r in losses) / len(losses):.3f}")
     print(f"  Expectativa:     ${total_pnl / n:.3f} por trade")
-    print(sample_warning(n))
+    if sample_warning(n):
+        print(sample_warning(n))
 
 
 def report_strategies(stats: dict) -> None:
@@ -95,6 +101,29 @@ def report_strategies(stats: dict) -> None:
         print(f"  {name}: {n} trades | win rate {s.get('win_rate', 0):.1f}% | "
               f"P&L ${s.get('total_pnl', 0.0):.2f} | avg win ${s.get('avg_win', 0):.3f} | "
               f"avg loss ${s.get('avg_loss', 0):.3f}")
+
+
+def report_calibration(records: list, strategy: str = None) -> None:
+    """Precio pagado vs win rate real: ¿el precio subestima la probabilidad?"""
+    label = f" ({strategy})" if strategy else ""
+    print(f"\n== Calibración por precio de entrada{label} ==")
+    rows = price_calibration(records, strategy=strategy)
+    used = [r for r in rows if r['trades']]
+    if not used:
+        print("  Sin trades cerrados con precio de entrada registrado.")
+        return
+    print("  bucket        n   win%    precio   breakeven   edge_pp   P&L")
+    for r in rows:
+        if not r['trades']:
+            continue
+        print(f"  {r['bucket']:<12} {r['trades']:>3} {r['win_rate']:>6.1f}% "
+              f"{r['avg_price']:>8.4f} {r['breakeven_win_rate']:>9.1f}% "
+              f"{r['edge_pp']:>+8.1f}  ${r['total_pnl']:>6.2f}")
+    total = sum(r['trades'] for r in used)
+    print("  edge_pp = win% observado - probabilidad implícita del precio")
+    print("  (positivo: las entradas rinden más de lo que el precio pide)")
+    if sample_warning(total):
+        print(sample_warning(total))
 
 
 def report_tail_end(records: list, log_records: list) -> None:
@@ -123,7 +152,8 @@ def report_tail_end(records: list, log_records: list) -> None:
     wins_to_recover = avg_entry / max(1 - avg_entry, 1e-9)
     print(f"  con entry media ${avg_entry:.2f}, 1 derrota borra ~{wins_to_recover:.0f} victorias "
           f"(retorno bruto {(1 - avg_entry) / avg_entry * 100:.1f}% por victoria).")
-    print(sample_warning(len(te)))
+    if sample_warning(len(te)):
+        print(sample_warning(len(te)))
 
 
 def main() -> None:
@@ -147,6 +177,7 @@ def main() -> None:
         print("  (sin registros estructurados: estos trades se cerraron antes de la fase 9)")
 
     report_records(records)
+    report_calibration(records)
     report_strategies(prof.get("strategy_stats") or {})
 
     if log_records and len(records) < total:

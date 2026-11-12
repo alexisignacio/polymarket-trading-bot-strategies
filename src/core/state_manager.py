@@ -27,6 +27,7 @@ def _trade_to_dict(trade: Any) -> Dict:
         'pnl': trade.pnl,
         'pnl_pct': trade.pnl_pct,
         'fees': trade.fees,
+        'outcome': getattr(trade, 'outcome', 'YES'),
     }
 
 
@@ -47,6 +48,7 @@ def _trade_from_dict(data: Dict) -> Optional[Any]:
             pnl=float(data['pnl']),
             pnl_pct=float(data.get('pnl_pct') or 0.0),
             fees=float(data.get('fees') or 0.0),
+            outcome=str(data.get('outcome') or 'YES'),
         )
     except Exception:
         return None

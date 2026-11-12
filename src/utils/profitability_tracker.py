@@ -25,6 +25,7 @@ class TradeRecord:
     pnl: float
     pnl_pct: float
     fees: float = 0.0
+    outcome: str = 'YES'  # which outcome token was traded
 
 
 class ProfitabilityTracker:

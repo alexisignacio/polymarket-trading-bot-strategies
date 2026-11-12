@@ -6,7 +6,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Status](https://img.shields.io/badge/status-active-success.svg)
 
-**An algorithmic trading bot for Polymarket prediction markets with 4 implemented trading strategies (paper trading)**
+**An algorithmic trading bot for Polymarket prediction markets with 3 implemented trading strategies (paper trading)**
 
 [Features](#-features) • [Quick Start](#-quick-start) • [Strategies](#-strategies) • [Documentation](#-documentation) • [Contributing](#-contributing)
 
@@ -33,11 +33,11 @@
 
 ## 🎯 Overview
 
-**PolyHFT** is a trading bot for Polymarket prediction markets. It runs 4 trading strategies against real market data with simulated (paper) fills by default. A gated live-order path exists (see below) but paper trading remains strongly recommended.
+**PolyHFT** is a trading bot for Polymarket prediction markets. It runs 3 trading strategies against real market data with simulated (paper) fills by default. A gated live-order path exists (see below) but paper trading remains strongly recommended.
 
 ### Key Highlights
 
-- 🚀 **4 Strategies**: single-market arbitrage, spread scalping, tail-end trading, and continuous market-making [BETA]
+- 🚀 **3 Strategies**: spread scalping, tail-end trading, and continuous market-making [BETA]
 - 🛡️ **Risk Management**: position limits (per trade/market/strategy), exposure caps, stop-losses, drawdown protection — all applied against real filled positions
 - 📊 **Paper Trading Mode** (default, and the only supported mode): orders fill against live market prices via a fill simulator; P&L is honest but no real money moves
 - ⚡ **Batch market data**: orderbooks fetched in batches (POST /books), parallel price prefetch, 5s cache TTL
@@ -86,22 +86,12 @@
 
 ## 📈 Trading Strategies
 
-> **Honest status**: only the 4 strategies below are implemented and run against
+> **Honest status**: only the 3 strategies below are implemented and run against
 > real market data with simulated (paper) fills. Everything in the
 > [concept catalog](#concept-catalog-not-implemented) at the end of this section
 > is a design idea that was pruned in Phase 0 and is **not implemented**.
 
-### 1. Single-Market Arbitrage ⚖️
-**Risk-free arbitrage within single markets**
-
-- Finds markets where YES + NO < $1.00
-- Buys all outcomes simultaneously
-- Profit at resolution if both legs are filled (depends on fills and unambiguous resolution)
-- Works with binary and multi-choice markets
-- **Best for**: markets where YES+NO asks sum below $1
-- **Example**: "Did it rain in London?" YES is trading at 40¢, NO is at 55¢. Total = 95¢. You buy 1000 shares of YES and 1000 shares of NO for $950 total. When market resolves, one side pays $1.00 (total $1000). Profit: $50 if both legs fill and resolution is unambiguous.
-
-### 2. Spread Scalping ⚡
+### 1. Spread Scalping ⚡
 **High-frequency spread capture**
 
 - Scans for liquid markets with wide spreads (3-5 cents)
@@ -110,7 +100,7 @@
 - **Best for**: Active markets with decent volume
 - **Example**: "Will Trump Win?" trading at 54¢. Bot sees order book imbalance and buy pressure. Buys at 54.2¢. Price ticks up to 55.5¢. Bot sells immediately. Profit: 1.3¢ per share (2.4% ROI in seconds).
 
-### 3. Tail-End Trading 🏁
+### 2. Tail-End Trading 🏁
 **High-probability outcomes near resolution**
 
 - Buys outcomes priced >$0.93 near expiry (<7 days)
@@ -119,7 +109,7 @@
 - **Best for**: Consistent, low-risk yield farming
 - **Example**: "Will Taylor Swift announce album by Friday?" Thursday night, no news. YES is trading at 2¢, NO is at 96¢. Bot buys NO at 96¢. Friday passes, no album. Market resolves NO. Profit: 4¢ per share (4.1% ROI overnight).
 
-### 4. Continuous Market Making 📊 [BETA]
+### 3. Continuous Market Making 📊 [BETA]
 **Band-based order management around market price**
 
 ⚠️ **BETA STATUS**: This strategy is under evaluation. Kept for the
@@ -146,6 +136,11 @@ ideas only — there is no code for them:
 - **Low-Volume High-Spread** — mint YES+NO pairs in new markets, work the legs.
 - **Combinatorial Arbitrage** — logical contradictions across correlated markets.
 - **Legged Arbitrage** — time-separated entry/hedge legs summing below $1.
+- **Single-Market Arbitrage** — buy YES+NO when combined asks < $1. Pruned in
+  Phase 11 after measuring 200 live liquid markets: the minimum observed
+  ask(YES)+ask(NO) was 1.001 (the 0.99 threshold is unreachable; market makers
+  keep the sum >= 1) and its scan burned ~400 price fetches per iteration for
+  a signal that never existed.
 
 
 ---
