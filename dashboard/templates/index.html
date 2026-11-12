@@ -287,7 +287,7 @@
       <div class="mt-5 pt-4 border-t border-slate-800/60">
         <div class="flex items-center justify-between mb-2">
           <h3 class="text-xs font-bold text-white tracking-wide">Calibración por precio de entrada</h3>
-          <span class="text-[10px] text-slate-500">win% real vs probabilidad implícita del precio</span>
+          <span id="calibrationEpoch" class="text-[10px] text-slate-500">win% real vs probabilidad implícita del precio</span>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-left text-xs text-slate-300">
@@ -619,6 +619,12 @@
         const data = await res.json();
         const tbody = document.getElementById('calibrationTableBody');
         const rows = (data.buckets || []).filter(b => b.trades > 0);
+        const epochEl = document.getElementById('calibrationEpoch');
+        if (epochEl) {
+          epochEl.textContent = data.epoch === 'flow_verified'
+            ? 'época verificada (fills con evidencia de flujo)'
+            : 'LEGACY: fills optimistas pre-fase 11 — no mezclar con datos reales';
+        }
 
         if (rows.length === 0) {
           tbody.innerHTML = `

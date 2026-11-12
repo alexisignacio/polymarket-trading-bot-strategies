@@ -22,14 +22,24 @@ sys.path.insert(0, str(ROOT))
 TELEGRAM_LIMIT = 4000  # leave margin under the 4096 message cap
 
 
-def build_report(state: str, log: str) -> str:
+def build_report(state: str, log: str, validate: bool = True) -> str:
     """The audit report as text (single source of truth: audit_trades.py)."""
     result = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "audit_trades.py"),
          "--state", state, "--log", log],
         capture_output=True, text=True, cwd=str(ROOT),
     )
-    return (result.stdout or "") + (result.stderr or "")
+    report = (result.stdout or "") + (result.stderr or "")
+
+    if validate:
+        check = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "validate_fills.py"),
+             "--state", state],
+            capture_output=True, text=True, cwd=str(ROOT),
+        )
+        report += "\n\n== Validación de fills vs prints reales ==\n"
+        report += (check.stdout or "") + (check.stderr or "")
+    return report
 
 
 def send_telegram(report: str) -> bool:
@@ -59,9 +69,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--state", default="bot_state.json")
     ap.add_argument("--log", default="logs/trades.log")
+    ap.add_argument("--no-validate", action="store_true",
+                    help="omitir la validación de fills contra prints reales")
     args = ap.parse_args()
 
-    report = build_report(args.state, args.log)
+    report = build_report(args.state, args.log, validate=not args.no_validate)
     print(report)
     if send_telegram(report):
         print("[daily_report] reporte enviado a Telegram")

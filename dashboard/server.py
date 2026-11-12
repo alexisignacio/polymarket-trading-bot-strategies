@@ -224,15 +224,24 @@ def get_strategy_stats():
 
 @app.get("/api/calibration")
 def get_calibration():
-    """Price-bucket calibration: entry price vs observed win rate."""
+    """Price-bucket calibration: entry price vs observed win rate.
+
+    Uses the flow-verified epoch (Phase 11+) when it has records; otherwise
+    falls back to legacy records and says so in 'epoch'.
+    """
     import sys
     sys.path.insert(0, str(BASE_DIR))
     from src.utils.calibration import price_calibration
     state = load_state()
     records = (state.get("profitability") or {}).get("trade_history") or []
+    verified = [r for r in records if r.get('fill_model') == 'flow_verified']
+    legacy = [r for r in records if r.get('fill_model') != 'flow_verified']
+    epoch = 'flow_verified' if verified else 'legacy_optimistic_fill'
+    chosen = verified or legacy
     return {
-        "trades": len(records),
-        "buckets": price_calibration(records),
+        "trades": len(chosen),
+        "epoch": epoch,
+        "buckets": price_calibration(chosen),
     }
 
 

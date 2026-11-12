@@ -26,6 +26,10 @@ class TradeRecord:
     pnl_pct: float
     fees: float = 0.0
     outcome: str = 'YES'  # which outcome token was traded
+    # 'flow_verified': closed under the Phase 11 evidence model (depth + real
+    # prints). Records without the field were closed by the old optimistic
+    # fill model and are marked 'legacy_optimistic_fill' on restore.
+    fill_model: str = 'flow_verified'
 
 
 class ProfitabilityTracker:

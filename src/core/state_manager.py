@@ -28,6 +28,7 @@ def _trade_to_dict(trade: Any) -> Dict:
         'pnl_pct': trade.pnl_pct,
         'fees': trade.fees,
         'outcome': getattr(trade, 'outcome', 'YES'),
+        'fill_model': getattr(trade, 'fill_model', 'legacy_optimistic_fill'),
     }
 
 
@@ -49,6 +50,9 @@ def _trade_from_dict(data: Dict) -> Optional[Any]:
             pnl_pct=float(data.get('pnl_pct') or 0.0),
             fees=float(data.get('fees') or 0.0),
             outcome=str(data.get('outcome') or 'YES'),
+            # Registros antiguos sin el campo provienen del modelo de fill
+            # optimista (pre-fase 11)
+            fill_model=str(data.get('fill_model') or 'legacy_optimistic_fill'),
         )
     except Exception:
         return None

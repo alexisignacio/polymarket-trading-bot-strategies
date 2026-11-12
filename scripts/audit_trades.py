@@ -64,12 +64,11 @@ def sample_warning(n: int) -> str:
     return f"  [!] muestra N={n} < {MIN_SAMPLE}: TODO es indicativo, no concluyente"
 
 
-def report_records(records: list) -> None:
+def report_records(records: list, label: str = "estructurados") -> None:
     n = len(records)
-    print(f"\n== Trades cerrados (registros estructurados: {n}) ==")
+    print(f"\n== Trades cerrados ({label}: {n}) ==")
     if n == 0:
-        print("  Sin registros: la historia estructurada empieza a acumularse")
-        print("  desde la fase 9 (los trades anteriores solo viven en contadores).")
+        print("  Sin registros en esta época.")
         return
 
     wins = [r for r in records if r["pnl"] > 0]
@@ -103,10 +102,10 @@ def report_strategies(stats: dict) -> None:
               f"avg loss ${s.get('avg_loss', 0):.3f}")
 
 
-def report_calibration(records: list, strategy: str = None) -> None:
+def report_calibration(records: list, strategy: str = None, label: str = "") -> None:
     """Precio pagado vs win rate real: ¿el precio subestima la probabilidad?"""
-    label = f" ({strategy})" if strategy else ""
-    print(f"\n== Calibración por precio de entrada{label} ==")
+    scope = label or ("todas las estrategias" if not strategy else strategy)
+    print(f"\n== Calibración por precio de entrada ({scope}) ==")
     rows = price_calibration(records, strategy=strategy)
     used = [r for r in rows if r['trades']]
     if not used:
@@ -176,8 +175,14 @@ def main() -> None:
     if total and not records:
         print("  (sin registros estructurados: estos trades se cerraron antes de la fase 9)")
 
-    report_records(records)
-    report_calibration(records)
+    verified = [r for r in records if r.get('fill_model') == 'flow_verified']
+    legacy = [r for r in records if r.get('fill_model') != 'flow_verified']
+
+    report_records(verified, label="verificados (evidencia de flujo)")
+    report_calibration(verified, label="verificados")
+    if legacy:
+        report_records(legacy, label="LEGACY, modelo optimista pre-fase 11")
+        report_calibration(legacy, label="LEGACY — no mezclar con los verificados")
     report_strategies(prof.get("strategy_stats") or {})
 
     if log_records and len(records) < total:
@@ -192,7 +197,7 @@ def main() -> None:
             reasons[key] = reasons.get(key, 0) + 1
         print("  Razones de cierre:", ", ".join(f"{k}({v})" for k, v in sorted(reasons.items())))
 
-    report_tail_end(records, log_records)
+    report_tail_end(verified or records, log_records)
 
 
 if __name__ == "__main__":
