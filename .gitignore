@@ -67,3 +67,4 @@ bot.pid
 !config/config.yaml.example
 
 dashboard.pid
+archives/
