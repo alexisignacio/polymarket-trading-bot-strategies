@@ -63,6 +63,8 @@ strategies:
     likely_outcome_threshold: 0.70
     order_size_usdc: 5.0  # USD notional per trade (must be <= risk.max_position_size)
     max_positions: 5
+    min_recent_prints: 1  # Entrar solo si hubo >= N prints reales recientes (flujo)
+    recent_prints_window: 1800  # Ventana de flujo reciente en segundos (30 min)
     markets_per_scan: 1000      # Markets to check per iteration (rotating scan)
     full_scan_interval: 10      # Reset cursor every N iterations to catch new markets
 

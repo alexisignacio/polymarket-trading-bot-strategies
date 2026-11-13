@@ -10,6 +10,7 @@ Logic:
 """
 
 from typing import Dict, List, Optional
+import time
 from datetime import datetime
 from dateutil import parser
 
@@ -41,6 +42,9 @@ class SpreadScalpingStrategy(BaseStrategy):
         self.order_size_usdc = self.config.get('order_size_usdc', 10.0)
         self.max_positions = self.config.get('max_positions', 5)
         self.order_ttl_seconds = self.config.get('order_ttl_seconds', 120.0)
+        # Flujo real reciente: sin prints no hay fills honestos, solo ruido
+        self.min_recent_prints = self.config.get('min_recent_prints', 1)
+        self.recent_prints_window = self.config.get('recent_prints_window', 1800)
         
         # Rotating scan configuration
         self.markets_per_scan = self.config.get('markets_per_scan', 1000)  # Markets to check per iteration
@@ -213,6 +217,21 @@ class SpreadScalpingStrategy(BaseStrategy):
         if spread < self.min_spread_cents:
             logger.debug(f"DEBUG: {market_id} {outcome} - Low spread: {spread} < {self.min_spread_cents}")
             return False
+
+        # Flujos reales recientes: un scalper necesita que el mercado opere.
+        # Sin prints recientes el modelo honesto nunca llena y las órdenes
+        # solo acumulan re-cotizaciones (verificado: candidatos con prints
+        # de hace 9h-9días no llenan ni una vez)
+        if self.flow_lookup:
+            try:
+                prints = self.flow_lookup(market_id) or []
+            except Exception:
+                prints = []
+            cutoff = time.time() - self.recent_prints_window
+            recent = sum(1 for p in prints if float(p.get('timestamp') or 0) >= cutoff)
+            if recent < self.min_recent_prints:
+                logger.debug(f"DEBUG: {market_id} {outcome} - sin flujo reciente ({recent} prints)")
+                return False
             
         # Found a candidate!
         

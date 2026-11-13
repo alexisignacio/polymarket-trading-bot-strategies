@@ -85,6 +85,32 @@ class TestNewStrategies(unittest.TestCase):
         self.mock_market_cache.get_price.side_effect = lambda mid, outcome: {'bid': 0.94, 'ask': 0.95}
         self.assertEqual(strategy.scan_opportunities(), [])
 
+    def test_spread_scalping_requires_recent_flow(self):
+        """Sin flujo real reciente no se entra: nada de cotizar mercados muertos"""
+        import time
+        from src.strategies.spread_scalping import SpreadScalpingStrategy
+
+        self.mock_risk_manager.position_tracker.get_positions_by_strategy.return_value = []
+        self.mock_client._order_coordinator = None
+        prices = {'bid': 0.70, 'ask': 0.76}
+
+        strategy = SpreadScalpingStrategy(
+            name="spread_scalping",
+            polymarket_client=self.mock_client,
+            risk_manager=self.mock_risk_manager,
+            config={'min_spread_cents': 0.03, 'likely_outcome_threshold': 0.60,
+                    'min_recent_prints': 1, 'recent_prints_window': 1800},
+            market_cache=self.mock_market_cache,
+            flow_lookup=lambda mid: [],
+        )
+        self.assertFalse(strategy._analyze_opportunity('m1', 'YES', prices, []))
+
+        fresh = [{'price': 0.71, 'timestamp': time.time(), 'outcome': 'YES'}]
+        strategy.flow_lookup = lambda mid: fresh
+        opportunities = []
+        self.assertTrue(strategy._analyze_opportunity('m1', 'YES', prices, opportunities))
+        self.assertEqual(len(opportunities), 1)
+
     def test_spread_scalping_cancels_stale_orders(self):
         """Unfilled resting orders must expire, or they block the scan forever"""
         from src.core.order_coordinator import OrderCoordinator, OrderStatus

@@ -107,6 +107,9 @@ class TradingBot:
         cache_ttl = self.config.get('market_cache_ttl', 5.0)
         self.market_cache = MarketCache(self.polymarket_client, cache_ttl=cache_ttl)
         
+        # Real trade prints (flow evidence for fills and candidate filtering)
+        self.data_api = DataAPIClient()
+        
         # Initialize strategies
         self.strategies: Dict[str, BaseStrategy] = {}
         self._initialize_strategies()
@@ -125,7 +128,6 @@ class TradingBot:
         self.profitability_tracker.set_initial_capital(initial_capital)
         
         # Paper fill simulator (fills pending paper orders against real prices)
-        self.data_api = DataAPIClient()
         self.paper_fills = PaperFillSimulator(
             self.order_coordinator,
             self.risk_manager,
@@ -176,7 +178,8 @@ class TradingBot:
                 polymarket_client=self.polymarket_client,
                 risk_manager=self.risk_manager,
                 config=market_making_config,
-                market_cache=self.market_cache
+                market_cache=self.market_cache,
+                flow_lookup=self.data_api.recent_trades
             )
         
         # Spread Scalping Strategy
@@ -187,7 +190,8 @@ class TradingBot:
                 polymarket_client=self.polymarket_client,
                 risk_manager=self.risk_manager,
                 config=spread_scalping_config,
-                market_cache=self.market_cache
+                market_cache=self.market_cache,
+                flow_lookup=self.data_api.recent_trades
             )
         
         # Tail-End Strategy
@@ -198,7 +202,8 @@ class TradingBot:
                 polymarket_client=self.polymarket_client,
                 risk_manager=self.risk_manager,
                 config=tail_end_config,
-                market_cache=self.market_cache
+                market_cache=self.market_cache,
+                flow_lookup=self.data_api.recent_trades
             )
         
         logger.info(f"Initialized {len(self.strategies)} strategies: {list(self.strategies.keys())}")

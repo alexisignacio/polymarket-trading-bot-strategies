@@ -1,7 +1,7 @@
 """Base strategy class"""
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 from ..exchanges.polymarket.adapter import PolymarketAdapter
 from ..api.perpdex_client import PerpdexClient
 from ..risk.risk_manager import RiskManager
@@ -23,7 +23,8 @@ class BaseStrategy(ABC):
         risk_manager: RiskManager,
         config: Dict,
         perpdex_client: Optional[PerpdexClient] = None,
-        market_cache: Optional['MarketCache'] = None
+        market_cache: Optional['MarketCache'] = None,
+        flow_lookup: Optional[Any] = None
     ):
         """
         Initialize base strategy.
@@ -35,6 +36,8 @@ class BaseStrategy(ABC):
             config: Strategy-specific configuration
             perpdex_client: Perpdex client (optional, for hedging)
             market_cache: Market cache for parallel fetching (optional)
+            flow_lookup: callable(market_id) -> recent real trade prints
+                (optional, for strategies that require trading flow)
         """
         self.name = name
         self.polymarket_client = polymarket_client
@@ -44,6 +47,7 @@ class BaseStrategy(ABC):
         self.enabled = config.get('enabled', True)
         self.position_counter = 0
         self.market_cache = market_cache
+        self.flow_lookup: Optional[Callable[[str], Any]] = flow_lookup
     
     def _generate_position_id(self) -> str:
         """Generate unique position ID"""
