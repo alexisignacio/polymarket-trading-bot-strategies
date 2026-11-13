@@ -21,8 +21,32 @@ read_pid() {
     [ -f "$1" ] && cat "$1" 2>/dev/null | tr -d '[:space:]'
 }
 
+# Bots huérfanos: procesos main.py vivos que no son el del pid file. Dos bots
+# a la vez corrompen bot_state.json (cada uno sobrescribe el historial del
+# otro), así que start/stop los matan siempre.
+stray_bot_pids() {
+    local owner
+    owner=$(read_pid "$BOT_PID_FILE")
+    for pid in $(pgrep -f "python main.py --paper" 2>/dev/null); do
+        [ "$pid" = "$owner" ] || [ "$pid" = "$$" ] || echo "$pid"
+    done
+}
+
+kill_strays() {
+    local killed=0
+    for pid in $(stray_bot_pids); do
+        echo "matando bot huérfano (PID $pid)"
+        kill -INT "$pid" 2>/dev/null
+        killed=1
+    done
+    if [ "$killed" = "1" ]; then
+        sleep 4
+    fi
+}
+
 start_bot() {
     local pid
+    kill_strays
     pid=$(read_pid "$BOT_PID_FILE")
     if pid_alive "$pid"; then
         echo "bot ya corriendo (PID $pid)"
@@ -95,6 +119,7 @@ case "$1" in
         ;;
     stop)
         stop_pid "$BOT_PID_FILE" "bot"
+        kill_strays
         stop_pid "$DASH_PID_FILE" "dashboard"
         ;;
     restart)
@@ -112,6 +137,9 @@ case "$1" in
             else
                 echo "$name: detenido"
             fi
+        done
+        for pid in $(stray_bot_pids); do
+            echo "bot huérfano: PID $pid (proceso main.py duplicado — 'stop' lo mata)"
         done
         curl -s --max-time 3 -o /dev/null -w "dashboard HTTP %{http_code}\n" http://127.0.0.1:8000/ || true
         ;;

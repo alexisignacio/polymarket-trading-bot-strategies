@@ -127,6 +127,26 @@ def test_trade_history_round_trip_preserves_fields(tmp_path):
     assert t.fees == 0.0
 
 
+def test_pid_file_refuses_second_bot(tmp_path, monkeypatch):
+    """Dos bots compartiendo bot_state.json se corrompen: el pid file lo impide."""
+    import os
+    import src.bot as bot_module
+
+    pid_file = tmp_path / "bot.pid"
+    monkeypatch.setattr(bot_module, "PID_FILE", pid_file)
+    dummy = object.__new__(bot_module.TradingBot)
+
+    # Un PID vivo ajeno bloquea el arranque (el del padre, que sí está vivo)
+    pid_file.write_text(str(os.getppid()))
+    with pytest.raises(RuntimeError, match="Otro bot ya"):
+        dummy._write_pid_file()
+
+    # Un pid file muerto se toma sin problema
+    pid_file.write_text("999999999")
+    dummy._write_pid_file()
+    assert pid_file.read_text().strip() == str(os.getpid())
+
+
 def test_cancelled_orders_are_pruned_from_state(tmp_path):
     from src.core.order_coordinator import OrderStatus
 

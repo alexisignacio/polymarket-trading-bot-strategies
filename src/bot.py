@@ -639,9 +639,27 @@ class TradingBot:
         self._remove_pid_file()
     
     def _write_pid_file(self) -> None:
-        """Publish our PID so the dashboard can detect externally started bots."""
+        """Publish our PID so the dashboard can detect externally started bots.
+
+        Refuses to start when another live bot already owns the PID file: two
+        bots sharing bot_state.json silently corrupt each other's history.
+        """
         try:
+            if PID_FILE.exists():
+                existing = PID_FILE.read_text().strip()
+                if existing.isdigit() and int(existing) != os.getpid():
+                    try:
+                        os.kill(int(existing), 0)
+                    except OSError:
+                        pass  # stale file, safe to take over
+                    else:
+                        raise RuntimeError(
+                            f"Otro bot ya está corriendo (PID {existing}). "
+                            f"Detenlo primero (scripts/service.sh stop) o borra {PID_FILE}."
+                        )
             PID_FILE.write_text(str(os.getpid()))
+        except RuntimeError:
+            raise
         except OSError as e:
             logger.warning(f"Could not write PID file {PID_FILE}: {e}")
     
